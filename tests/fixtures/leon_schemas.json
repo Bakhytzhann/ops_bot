@@ -1,0 +1,156 @@
+{
+  "get-duty-list": {
+    "schema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "timeInterval": {
+          "description": "Time interval, max length typically up to 1 month; extended limits (2\u20133 months)",
+          "type": "object",
+          "properties": {
+            "start": {
+              "description": "Interval start datetime in UTC. Must be before end. Allowed format is: yyyy-MM-dd'T'HH:mm:ss'Z'",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "end": {
+              "description": "Interval end datetime in UTC. Allowed format is: yyyy-MM-dd'T'HH:mm:ss'Z'",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ]
+        },
+        "loginNidList": {
+          "description": "List of login NIDs (numeric identifiers) for crew members whose duties MUST be retrieved.\nLogin NIDs can be obtained using contact search tools (e.g., search-contacts-by-wildcard).\nExample: [12345, 67890]",
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "dutyDefinitionNidList": {
+          "description": "(OPTIONAL) List of duty definition NIDs to filter results by specific duty definitions.\nDuty definition NIDs SHOULD be retrieved using the get-duty-definition-all tool first.\nEach duty definition has a type (duty, training, or off), but this parameter filters by specific definitions, not by type.\nIf not provided, duties of all definitions will be returned.\nExample: [101, 202, 303] to retrieve duties only for these specific duty definitions.",
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "timeInterval",
+        "loginNidList",
+        "dutyDefinitionNidList"
+      ]
+    }
+  },
+  "get-crew-ftl-sheet": {
+    "schema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "crewMember": {
+          "description": "Identifies the crew member. MUST be either a crew member code (string, min 3 chars) or a login_nid (positive integer).",
+          "anyOf": [
+            {
+              "description": "Crew member code (e.g. \"JKO\")",
+              "type": "string",
+              "minLength": 3
+            },
+            {
+              "description": "Crew member login_nid (numeric ID)",
+              "type": "number",
+              "minimum": 1
+            }
+          ]
+        },
+        "timeInterval": {
+          "description": "Time interval for which the FTL sheet data is fetched. MUST be at most 2 months.",
+          "type": "object",
+          "properties": {
+            "start": {
+              "description": "Start of the time interval. Wrong DateTime format - it should be yyyy-MM-dd'T'HH:mm:ss'Z'. Example: \"2025-01-01T00:00:00Z\"",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "end": {
+              "description": "End of the time interval. Wrong DateTime format - it should be yyyy-MM-dd'T'HH:mm:ss'Z'. Example: \"2025-02-28T23:59:59Z\"",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ]
+        }
+      },
+      "required": [
+        "crewMember",
+        "timeInterval"
+      ]
+    }
+  },
+  "get-crew-ftl-violations": {
+    "schema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "crewMember": {
+          "description": "Identifies the crew member. MUST be either a crew member code (string, min 3 chars) or a login_nid (positive integer).",
+          "anyOf": [
+            {
+              "description": "Crew member code (e.g. \"JKO\")",
+              "type": "string",
+              "minLength": 3
+            },
+            {
+              "description": "Crew member login_nid (numeric ID)",
+              "type": "number",
+              "minimum": 1
+            }
+          ]
+        },
+        "timeInterval": {
+          "description": "Time interval for which the FTL violations data is fetched. MUST be at most 2 months.",
+          "type": "object",
+          "properties": {
+            "start": {
+              "description": "Start of the time interval. Wrong DateTime format - it should be yyyy-MM-dd'T'HH:mm:ss'Z'. Example: \"2025-01-01T00:00:00Z\"",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            },
+            "end": {
+              "description": "End of the time interval. Wrong DateTime format - it should be yyyy-MM-dd'T'HH:mm:ss'Z'. Example: \"2025-01-30T23:59:59Z\"",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ]
+        }
+      },
+      "required": [
+        "crewMember",
+        "timeInterval"
+      ]
+    }
+  }
+}
