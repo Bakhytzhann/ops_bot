@@ -37,7 +37,7 @@ from bot.commands import (
 from bot.flight_browser import (
     handle_selection,
     invalidate_screen,
-    is_summary_callback,
+    is_card_notice_callback,
     show_week,
 )
 from bot.keyboards import HOME_SECTIONS, SCHEDULE_BUTTON, home_keyboard
@@ -122,7 +122,7 @@ async def handle_button(update, context):
         )
         return
     if (query.data or "").startswith(("wk:", "fl:", "fc:", "sk:", "sv:")):
-        if not is_summary_callback(query.data):
+        if not is_card_notice_callback(query.data):
             await query.answer()
         await weekly_flow(update, context, selection=True)
         return
@@ -181,7 +181,7 @@ async def weekly_flow(update, context, *, selection=False):
         )
         await asyncio.wait_for(operation, timeout=120)
     except ValueError as exc:
-        if selection and is_summary_callback(update.callback_query.data):
+        if selection and is_card_notice_callback(update.callback_query.data):
             await update.callback_query.answer(str(exc), show_alert=True)
         else:
             await update.effective_message.reply_text(

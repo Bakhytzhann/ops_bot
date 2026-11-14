@@ -226,6 +226,7 @@ async def test_foreflight_ete_survives_pdf_failure(
             }
         )
         get_document = AsyncMock(return_value={"url": "https://example.test/document"})
+        get_overflight = AsyncMock(return_value={"overflownCountries": []})
 
     monkeypatch.setattr(flight_foreflight, "ForeFlightClient", Client)
     monkeypatch.setattr(

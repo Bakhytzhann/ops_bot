@@ -210,7 +210,7 @@ async def test_card_refreshes_exact_leg_then_fetches_crew_and_weather(
     text = flight_card.render_snapshot(snapshot)
     crew.assert_awaited_once_with(222)
     weather.assert_awaited_once_with(second, "2026-11-11", include_taf=True)
-    assert "UACC 1200z → 1330z UAAA" in text
+    assert "UACC 1200z 1330z UAAA" in text
     assert snapshot.blocks["weather"].text == "UACC and UAAA METAR"
 
 

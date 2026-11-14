@@ -1,18 +1,25 @@
 """Compact Flight Card from source fields; detailed bulletins remain unchanged."""
 
-import textwrap
+import json
+from pathlib import Path
 
-from services.flight_display import flight_reference, flight_stamp, flight_time
+from services.flight_display import flight_date, flight_stamp, flight_time
 from services.flight_weather import (
-    compact_metar,
     grouped_reports,
-    metar_stamp,
     station_label,
     station_roles,
 )
 from services.foreflight_operations import duration
 from services.notam_filters import notam_sets
-from services.weather_reports import metar_age_warning
+
+_COUNTRY_CODES = {
+    country[key].strip().casefold(): country["alpha_3"]
+    for country in json.loads(
+        Path(__file__).with_name("iso_countries.json").read_text(encoding="utf-8")
+    )["countries"]
+    for key in ("alpha_2", "alpha_3", "name", "official_name", "common_name")
+    if key in country
+}
 
 
 def eet_summary(block):
@@ -26,115 +33,110 @@ def eet_summary(block):
 def wx_summary(snapshot, preferences=None):
     block = snapshot.blocks.get("weather")
     reports = block.details.get("reports", []) if block else []
-    stations = [
-        (station, roles, grouped_reports(reports, station, "METAR"))
-        for station, roles in station_roles(snapshot).items()
-    ]
-    signatures = {
-        (metar_stamp(entry["raw"]), tuple(entry["sources"]))
-        for _, _, entries in stations
-        for entry in entries
-    }
-    shared = next(iter(signatures)) if len(signatures) == 1 else None
-    header = ["WX", "METAR" + (" " + shared[0] if shared and shared[0] else "")]
-    if shared:
-        header.extend(part for part in (" / ".join(shared[1]),) if part)
-    lines = [" · ".join(header)]
-    for station, roles, entries in stations:
-        lines.append(
-            station_label(snapshot, station, preferences)
-            + " ("
-            + " / ".join(roles)
-            + ")"
-        )
+    lines = ["WX"]
+    for station in station_roles(snapshot):
+        label = station_label(snapshot, station, preferences)
+        entries = grouped_reports(reports, station, "METAR")
         if not entries:
-            lines.append("нет данных")
+            lines.extend([f"{label} NO WX REPORT", ""])
+            continue
         for entry in entries:
-            if shared is None:
-                lines.append(
-                    " · ".join(
-                        part
-                        for part in (
-                            metar_stamp(entry["raw"]),
-                            " / ".join(entry["sources"]),
-                        )
-                        if part
-                    )
-                )
-            text = compact_metar(entry["raw"])
-            if "устарел" in metar_age_warning(
-                entry["raw"], entry.get("metadata") or ""
-            ):
-                text += " · устарел"
-            lines.append(text)
-        lines.append("")
-    return "\n".join(lines).strip()
+            sources = "/".join(source.upper() for source in entry["sources"])
+            raw = entry["raw"]
+            product = "METAR"
+            for prefix in ("METAR ", "SPECI "):
+                if raw.startswith(prefix):
+                    product, raw = prefix.strip(), raw[len(prefix) :]
+                    break
+            if label == station:
+                raw = raw.removeprefix(station + " ")
+            lines.extend([f"{label} ({sources}) {product} {raw}", ""])
+    return "\n".join(lines).rstrip()
 
 
 def route_summary(snapshot, preferences=None):
     block = snapshot.blocks.get("route")
-    route = block.details.get("route") if block else None
-    return (
-        textwrap.fill(
-            "RTE " + route, width=82, break_long_words=False, break_on_hyphens=False
+    countries = block.details.get("overflownCountries") if block else None
+    if not isinstance(countries, list) or not countries:
+        return "Пролеты: нет данных"
+    codes = [
+        next(
+            (
+                _COUNTRY_CODES[value.strip().casefold()]
+                for key in ("isoCode", "name")
+                if isinstance(country, dict)
+                and isinstance(value := country.get(key), str)
+                and value.strip().casefold() in _COUNTRY_CODES
+            ),
+            "нет данных",
         )
-        if route
-        else ""
+        for country in countries
+    ]
+    return "Пролеты: " + ", ".join(
+        code
+        for index, code in enumerate(codes)
+        if not index or code != codes[index - 1]
     )
 
 
 def notam_summary(snapshot, preferences=None):
-    lines = []
-    seen = set()
-    for endpoint in ("departure", "arrival"):
-        station = snapshot.flight.get(endpoint)
-        if not station or station in seen:
-            continue
-        seen.add(station)
+    stations = station_roles(snapshot)
+    primary, alternates = [], []
+    for station, roles in stations.items():
         groups, recognized = notam_sets(snapshot, station)
-        label = station_label(snapshot, station, preferences)
-        lines.append(
-            f"{label} · AFFECT {len(groups['A'])} · REVIEW {len(groups['R'])} · ACTIVE {len(groups['C'])}"
+        counts = (
+            "/".join(str(len(groups[key])) for key in ("A", "R", "C"))
             if recognized
-            else label + " · нет данных"
+            else "—/—/—"
         )
-    return "\n".join(lines)
+        entry = f"{station_label(snapshot, station, preferences)} ({counts})"
+        (primary if "DEP" in roles or "ARR" in roles else alternates).append(entry)
+    return "NOTAM (AFFECT / REVIEW / ACTIVE):\n" + " ".join(
+        [
+            *primary,
+            *(["ALTN: " + " ".join(alternates)] if alternates else []),
+        ]
+    )
 
 
 def render_card(snapshot, preferences=None):
     flight = snapshot.flight
-    acft = " / ".join(
-        str(flight[key]) for key in ("aircraftType", "aircraft") if flight.get(key)
-    )
-    first = flight_reference(flight, preferences) + (f" ({acft})" if acft else "")
+    number = flight.get("flightNumber") or "нет данных"
+    registration = f" {flight['aircraft']}" if flight.get("aircraft") else ""
+    display_preferences = preferences
     departure, arrival = (
-        flight_stamp(flight, endpoint, preferences)
+        flight_stamp(flight, endpoint, display_preferences)
         for endpoint in ("departure", "arrival")
     )
     offset = (arrival.date() - departure.date()).days if arrival and departure else 0
-    sta = flight_time(flight, "arrival", preferences) + (
+    sta = flight_time(flight, "arrival", display_preferences) + (
         f" ({offset:+d}d)" if offset else ""
     )
-    second = f"{station_label(snapshot, flight.get('departure'), preferences)} {flight_time(flight, 'departure', preferences)} → {sta} {station_label(snapshot, flight.get('arrival'), preferences)}"
-    eet = eet_summary(snapshot.blocks.get("flighttime"))
+    first = " ".join(
+        part
+        for part in (
+            f"{number}{registration}",
+            flight_date(flight, display_preferences),
+            station_label(snapshot, flight.get("departure"), preferences),
+            flight_time(flight, "departure", display_preferences),
+            sta,
+            station_label(snapshot, flight.get("arrival"), preferences),
+        )
+        if part
+    )
+    second = "Расчетное " + eet_summary(snapshot.blocks.get("flighttime"))
     crew = snapshot.blocks.get("crew")
     codes = crew.details.get("codes", []) if crew else []
-    third = []
-    if eet != "нет данных":
-        third.append("полётное " + eet)
     if codes:
-        third.append("CREW " + "/".join(codes))
-    header = "\n".join(
-        [first, second, *(["(" + " · ".join(third) + ")"] if third else [])]
-    )
-    lines = [header]
+        second += " · CREW " + "/".join(codes)
+    lines = [first + "\n" + second]
     if flight.get("cancelled"):
         lines.append("ОТМЕНЁН")
     lines.extend(
         [
             wx_summary(snapshot, preferences),
             route_summary(snapshot, preferences),
-            "NOTAM\n" + notam_summary(snapshot, preferences),
+            notam_summary(snapshot, preferences),
         ]
     )
     return "\n\n".join(line for line in lines if line)

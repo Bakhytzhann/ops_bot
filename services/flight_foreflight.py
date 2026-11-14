@@ -1,6 +1,7 @@
 """ForeFlight snapshot components with independently reported errors."""
 
 import asyncio
+from urllib.parse import urlsplit
 
 from integrations.foreflight.briefing import download_briefing
 from services.briefing_notams import counts, extract_notams
@@ -39,12 +40,39 @@ async def load_foreflight(flight, partial=None):
             if difference
             else ""
         )
-        detail, document = await asyncio.gather(
+        detail, document, overflight = await asyncio.gather(
             client.get_flight(row["flightId"]),
             client.get_document(row["flightId"], "briefing"),
+            client.get_overflight(row["flightId"]),
             return_exceptions=True,
         )
-    blocks = {}
+    briefing_url = document.get("url") if isinstance(document, dict) else None
+    try:
+        parsed = urlsplit(briefing_url) if isinstance(briefing_url, str) else None
+        if (
+            not parsed
+            or parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or any(c.isspace() for c in briefing_url)
+        ):
+            briefing_url = None
+    except ValueError:
+        briefing_url = None
+    blocks = {
+        "briefing": SourceBlock(
+            "ForeFlight",
+            "Briefing",
+            "ready" if briefing_url else "unavailable",
+            details={
+                "url": briefing_url,
+                "generated": document.get("timeGenerated")
+                if isinstance(document, dict)
+                else None,
+            },
+        )
+    }
     if isinstance(detail, dict):
         data = detail.get("flightData") or {}
         performance = detail.get("performance") or {}
@@ -90,6 +118,9 @@ async def load_foreflight(flight, partial=None):
             "ready" if route_text and not errors and not match_warning else "partial",
             details={
                 "route": route_text,
+                "overflownCountries": overflight.get("overflownCountries")
+                if isinstance(overflight, dict)
+                else None,
                 "alternate": data.get("alternate"),
                 "secondAlternate": data.get("secondAlternate"),
                 "takeOffAlternate": data.get("takeOffAlternate"),

@@ -86,8 +86,7 @@ async def test_session_toggles_survive_card_details_and_back(
     monkeypatch.setattr(browser, "load_flight_snapshot", load)
     model = AsyncMock()
     monkeypatch.setattr(agent, "chat", model)
-    await browser.handle_selection(update(data="sv:token:time"), session)
-    await browser.handle_selection(update(data="sv:token:codes"), session)
+    await browser.handle_selection(update(data="sv:token:view"), session)
     card = update(data="fc:token:0:card:0")
     await browser.handle_selection(card, session)
     text = card.callback_query.edit_message_text.call_args.args[0]
@@ -278,7 +277,7 @@ def test_report_contains_sources_and_card_is_bounded():
     card = render_snapshot(snapshot)
     assert len(card) <= 3800
     for title in (
-        "FLT",
+        "ABC1265",
         "WX",
         "NOTAM",
     ):

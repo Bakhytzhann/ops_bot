@@ -112,13 +112,14 @@ def test_card_is_compact_without_repeated_source_boilerplate(card):
     text = render_snapshot(card)
     assert len(text) < 1500
     for value in (
-        "FLT ABC1265 · 13NOV",
-        "UAAA 0030z → 0200z UGTB",
-        "полётное 01:30 · CREW VVI/YMA/RZA",
-        "00000KT · 9999 · SCT020 · +10°C · Q1015",
-        "RTE DCT TEST",
-        "UACC (ALTN)",
-        "UAAA · AFFECT 1 · REVIEW 1 · ACTIVE",
+        "ABC1265 TEST 13NOV",
+        "UAAA 0030z 0200z UGTB",
+        "Расчетное 01:30 · CREW VVI/YMA/RZA",
+        "UAAA (LEON) METAR 130000Z",
+        "METAR 130000Z 00000KT 9999 SCT020 10/05 Q1015",
+        "Пролеты: нет данных",
+        "ALTN: UACC (—/—/—)",
+        "UAAA (1/1/",
     ):
         assert value in text
     for value in (
@@ -141,12 +142,12 @@ def test_card_buttons_exact_and_switch_directions(card):
     assert [[b.text for b in row] for row in markup.inline_keyboard] == [
         ["DUTY / REST", "WX / TAF"],
         ["RTE / ALTN", "NOTAM"],
-        ["Z → LT", "ICAO → IATA"],
+        ["Local Time/IATA", "Briefing"],
         ["Bot Summary"],
         ["REFRESH", "← SKED"],
     ]
     buttons = ui.preference_buttons("token", {"time": "LT", "codes": "IATA"})
-    assert [b.text for b in buttons] == ["LT → Z", "IATA → ICAO"]
+    assert [b.text for b in buttons] == ["Zulu/ICAO"]
 
 
 def test_sked_dates_inside_flight_buttons_only(card):
@@ -183,7 +184,7 @@ def test_eet_never_uses_actual_or_block_time():
 
 def test_local_card_and_midnight_offset(card):
     text = render_snapshot(card, {"time": "LT", "codes": "IATA"})
-    assert "ALA 0530 LT → 0600 LT UGTB (ICAO)" in text
+    assert "ALA 0530 LT 0600 LT UGTB (ICAO)" in text
     assert "UACC (ICAO)" in text
     card.flight["arrivalUTC"] = "2026-11-14T02:00:00Z"
     assert "0200z (+1d)" in flight_header(card.flight)
@@ -314,6 +315,8 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
             await bot.handle_button(u, ctx)
             u.effective_message.reply_text.assert_not_awaited()
             assert len(u.callback_query.edit_message_text.call_args.args[0]) <= 3800
+            if action in {"card", "refresh"}:
+                assert u.callback_query.edit_message_text.call_args.kwargs["entities"]
             buttons = u.callback_query.edit_message_text.call_args.kwargs[
                 "reply_markup"
             ].inline_keyboard

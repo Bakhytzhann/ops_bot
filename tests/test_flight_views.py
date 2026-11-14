@@ -30,14 +30,12 @@ def test_target_three_lines_and_unique_roles(card):
     card.flight.update(aircraftType="E35L", aircraft="UP-TEST")
     card.blocks["route"].details["secondAlternate"] = "UAAA"
     text = render_card(card)
-    assert text.splitlines()[:3] == [
-        "FLT ABC1265 · 13NOV (E35L / UP-TEST)",
-        "UAAA 0030z → 0200z UGTB",
-        "(полётное 01:30 · CREW VVI/YMA/RZA)",
+    assert text.splitlines()[:2] == [
+        "ABC1265 UP-TEST 13NOV UAAA 0030z 0200z UGTB",
+        "Расчетное 01:30 · CREW VVI/YMA/RZA",
     ]
-    assert "UAAA (DEP / ALTN 2)" in text
-    assert text.count("UAAA (DEP") == 1
-    assert "RTE DCT TEST" in text and "ALTN UACC" not in text
+    assert text.count("UAAA (") == 2  # WX and NOTAM, without duplicate ALTN.
+    assert "Пролеты: нет данных" in text and "DCT TEST" not in text
     assert "CPT: Test" not in text
     card.blocks["crew"].details["codes"] = []
     assert "CREW" not in render_card(card)
@@ -69,11 +67,11 @@ def test_wx_shared_header_and_conflicting_source_times(card):
     ]
     card.blocks["weather"].details["reports"] = rows
     text = wx_summary(card)
-    assert text.startswith("WX · METAR 130100Z · Leon / AWC")
-    assert text.count("03002MPS") == 1 and text.count("130100Z") == 1
+    assert text.startswith("WX\nUAAA (LEON/AWC) METAR " + raw.removeprefix("UAAA "))
+    assert text.count(raw.removeprefix("UAAA ")) == 1
     rows[1]["raw"] = raw.replace("130100Z", "130130Z")
     text = wx_summary(card)
-    assert "130100Z · Leon" in text and "130130Z · AWC" in text
+    assert "LEON) METAR 130100Z" in text and "AWC) METAR 130130Z" in text
     assert text.count("03002MPS") == 2
 
 
@@ -142,7 +140,7 @@ def test_notam_filters_match_card_and_current_snapshot(notams):
     groups, known = notam_sets(notams, "UAAA")
     assert known and len(groups["T"]) == 12 and len(groups["A"]) == 11
     assert len(groups["R"]) == 1 and len(groups["C"]) == 10
-    assert "UAAA · AFFECT 11 · REVIEW 1 · ACTIVE 10" in notam_summary(notams)
+    assert "UAAA (11/1/10)" in notam_summary(notams)
     assert groups["R"][0][1].identifier == "A0001/26"
 
 

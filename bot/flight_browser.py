@@ -1,10 +1,11 @@
 """Shared SKED sessions and Flight Cards scoped to the originating chat/topic."""
 
+import re
 from datetime import UTC, datetime, timedelta
 from secrets import token_hex
 from time import monotonic
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 
 from application.operations import flight_schedule as get_flight_schedule
 from application.operations import prepare_flight as load_flight_snapshot
@@ -56,19 +57,14 @@ def flight_label(flight, preferences=None):
 
 
 def preference_buttons(token, preferences, *, position=None):
-    if position is None:
-        callbacks = (f"sv:{token}:time", f"sv:{token}:codes")
-    else:
-        callbacks = (f"fc:{token}:{position}:time:0", f"fc:{token}:{position}:codes:0")
+    callback = (
+        f"sv:{token}:view" if position is None else f"fc:{token}:{position}:view:0"
+    )
+    local = preferences.get("time") == "LT" and preferences.get("codes") == "IATA"
     return [
         InlineKeyboardButton(
-            "LT → Z" if preferences.get("time") == "LT" else "Z → LT",
-            callback_data=callbacks[0],
-        ),
-        InlineKeyboardButton(
-            "IATA → ICAO" if preferences.get("codes") == "IATA" else "ICAO → IATA",
-            callback_data=callbacks[1],
-        ),
+            "Zulu/ICAO" if local else "Local Time/IATA", callback_data=callback
+        )
     ]
 
 
@@ -213,9 +209,13 @@ async def show_week(
         await update.effective_message.reply_text(text, reply_markup=markup)
 
 
-def is_summary_callback(data):
+def is_card_notice_callback(data):
     parts = (data or "").split(":")
-    return len(parts) == 5 and parts[0] == "fc" and parts[3] in {"summary", "report"}
+    return (
+        len(parts) == 5
+        and parts[0] == "fc"
+        and parts[3] in {"summary", "report", "briefing"}
+    )
 
 
 async def handle_selection(update, context):
@@ -236,7 +236,7 @@ async def handle_selection(update, context):
         raise ValueError(
             "Список устарел или открыт в другой теме. Откройте SKED снова."
         )
-    if is_summary_callback(query.data):
+    if is_card_notice_callback(query.data):
         index = int(position)
         snapshot = listing.get("snapshots", {}).get(index)
         navigation = (
@@ -253,13 +253,18 @@ async def handle_selection(update, context):
             or (navigation and navigation.get("return_to") != (token, index))
         ):
             raise ValueError("Карточка устарела. Откройте рейс из SKED.")
-        await query.answer("Bot Summary — функция пока не подключена.")
+        if parts[3] == "briefing":
+            await query.answer(
+                "Брифинг ForeFlight недоступен. Нажмите REFRESH.", show_alert=True
+            )
+        else:
+            await query.answer("Bot Summary — функция пока не подключена.")
         return
     preferences = listing.setdefault("preferences", {})
     if kind in {"sv", "sk"}:
         listing["screen_revision"] = listing.get("screen_revision", 0) + 1
         if kind == "sv":
-            if position not in {"time", "codes"}:
+            if position not in {"view", "time", "codes"}:
                 raise ValueError("Неизвестный переключатель.")
             toggle_preference(preferences, position)
             text, markup = render_page(token, listing, listing.get("page", 0))
@@ -310,6 +315,7 @@ async def handle_selection(update, context):
                 "arr",
                 "route",
                 "eet",
+                "view",
                 "time",
                 "codes",
             }
@@ -317,7 +323,7 @@ async def handle_selection(update, context):
             raise ValueError("Неизвестное действие карточки.")
         import asyncio
 
-        if action in {"time", "codes"}:
+        if action in {"view", "time", "codes"}:
             toggle_preference(preferences, action)
             action = listing.get("action", "card")
         locks = listing.setdefault("locks", {})
@@ -342,7 +348,12 @@ async def handle_selection(update, context):
                             and text != last_progress[0]
                         ):
                             await edit_message_text(
-                                query, text[:3800], disable_web_page_preview=True
+                                query,
+                                text[:3800],
+                                disable_web_page_preview=True,
+                                entities=card_entities(
+                                    text[:3800], partial, preferences
+                                ),
                             )
                             last_progress[0] = text
 
@@ -422,8 +433,45 @@ async def handle_selection(update, context):
                 or getattr(update.effective_message, "reply_markup", None) != markup
             ):
                 await edit_message_text(
-                    query, text, reply_markup=markup, disable_web_page_preview=True
+                    query,
+                    text,
+                    reply_markup=markup,
+                    disable_web_page_preview=True,
+                    **(
+                        {"entities": card_entities(text, snapshot, preferences)}
+                        if action in {"card", "refresh"}
+                        else {}
+                    ),
                 )
+
+
+def card_entities(text, snapshot, preferences=None):
+    from services.flight_weather import station_label, station_roles
+
+    stations = station_roles(snapshot)
+    tokens = {
+        snapshot.flight.get("flightNumber"),
+        flight_date(snapshot.flight, preferences),
+    }
+    tokens.update(stations)
+    tokens.update(
+        station_label(snapshot, station, preferences).split()[0] for station in stations
+    )
+    tokens.discard(None)
+    tokens.discard("нет данных")
+    choices = "|".join(
+        [re.escape(token) for token in sorted(tokens, key=len, reverse=True)]
+        + [r"\d{4}z", r"\d{6}Z"]
+    )
+    pattern = rf"(?<!\w)(?:{choices})(?!\w)"
+    return [
+        MessageEntity(
+            type="bold",
+            offset=len(text[: match.start()].encode("utf-16-le")) // 2,
+            length=len(match.group().encode("utf-16-le")) // 2,
+        )
+        for match in re.finditer(pattern, text)
+    ]
 
 
 def card_keyboard(
@@ -437,7 +485,15 @@ def card_keyboard(
     rows = [
         [button("DUTY / REST", "duty"), button("WX / TAF", "weather")],
         [button("RTE / ALTN", "route"), button("NOTAM", "notams")],
-        preference_buttons(token, preferences or {}, position=position),
+        preference_buttons(token, preferences or {}, position=position)
+        + [
+            InlineKeyboardButton(
+                "Briefing", url=snapshot.blocks["briefing"].details["url"]
+            )
+            if snapshot.blocks.get("briefing")
+            and snapshot.blocks["briefing"].details.get("url")
+            else button("Briefing", "briefing")
+        ],
     ]
     if pages > 1:
         rows.append(
@@ -488,7 +544,7 @@ def card_detail(snapshot, action, preferences=None):
 
 
 def toggle_preference(preferences, key):
-    choices = ("Z", "LT") if key == "time" else ("ICAO", "IATA")
-    preferences[key] = (
-        choices[1] if preferences.get(key, choices[0]) == choices[0] else choices[0]
-    )
+    if key not in {"view", "time", "codes"}:
+        raise ValueError("Неизвестный переключатель.")
+    local = preferences.get("time") == "LT" and preferences.get("codes") == "IATA"
+    preferences.update(time="Z" if local else "LT", codes="ICAO" if local else "IATA")
