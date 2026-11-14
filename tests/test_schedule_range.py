@@ -71,11 +71,15 @@ async def test_invalid_range_never_calls_leon(leon):
 
 
 @pytest.mark.asyncio
-async def test_access_required(leon):
+async def test_schedule_independent_of_telegram_identity(leon):
+    leon.return_value = {
+        "flightList": [],
+        "shouldRerunRequestForNextPageWithOffset": False,
+    }
     token = current_user_id.set(None)
     try:
-        with pytest.raises(PermissionError):
-            await tools.get_flight_schedule("2026-11-11", "2026-11-30")
+        result = await tools.get_flight_schedule("2026-11-11", "2026-11-30")
+        assert "complete" in result
     finally:
         current_user_id.reset(token)
-    leon.assert_not_awaited()
+    leon.assert_awaited()

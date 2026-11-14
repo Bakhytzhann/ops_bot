@@ -147,25 +147,19 @@ def test_notam_filters_match_card_and_current_snapshot(notams):
 
 
 def test_notam_pages_and_record_navigation(notams):
-    text, markup = render_notams(notams, "token", 0, "nlD_T", 1)
-    assert "PAGE 2/3 · 6–10 / 12" in text
-    records = [b for b in buttons(markup) if ":nv" in b.callback_data]
-    assert len(records) == 5
-    assert {b.text for b in buttons(markup)} >= {
-        "PREV",
-        "NEXT",
+    text, markup = render_notams(notams, "token", 0, "nlD_T")
+    assert "PAGE 1/1 · 1–12 / 12" in text
+    for _, record in notam_sets(notams, "UAAA")[0]["T"]:
+        assert record.raw in text and record.topic in text
+    assert [b.text for b in markup.inline_keyboard[0]] == ["DEP UAAA", "ARR UGTB"]
+    assert {b.text for b in markup.inline_keyboard[1]} == {
         "AFFECT 11",
         "REVIEW 1",
         "ACTIVE 10",
         "ALL 12",
     }
-    action = records[0].callback_data.split(":")[3]
-    text, detail = render_notams(notams, "token", 0, action)
-    assert "FULL TEXT 5" in text and "FULL TEXT 6" not in text
-    back = next(b for b in buttons(detail) if b.text == "BACK")
-    assert back.callback_data == "fc:token:0:nlD_T:1"
-    assert {b.text for b in buttons(detail)} >= {"PREV", "NEXT", "BACK", "Flight Card"}
-    assert all(len(b.callback_data.encode()) <= 64 for b in buttons(detail))
+    assert not any(":nv" in b.callback_data for b in buttons(markup))
+    assert all(len(b.callback_data.encode()) <= 64 for b in buttons(markup))
     _, arr = render_notams(notams, "token", 0, "nlA_T")
     assert not any(":nv" in b.callback_data for b in buttons(arr))
 
@@ -181,28 +175,22 @@ def test_notam_unknown_section_is_not_zero_and_bad_indices_fail(notams):
 
 
 def test_notam_stale_record_cannot_open_different_text(notams):
-    _, markup = render_notams(notams, "token", 0, "nlD_T")
-    action = next(
-        b for b in buttons(markup) if ":nv" in b.callback_data
-    ).callback_data.split(":")[3]
-    notams.blocks["notams"].details["notams"]["UAAA"][0].raw += " CHANGED"
-    with pytest.raises(ValueError, match="изменён"):
-        render_notams(notams, "token", 0, action)
+    with pytest.raises(ValueError, match="Неизвестный экран"):
+        render_notams(notams, "token", 0, "nvD_T_0_00000000")
 
 
 def test_long_notam_full_text_is_accessible_without_truncation(notams):
     record = notams.blocks["notams"].details["notams"]["UAAA"][0]
-    record.raw = "X" * 7500
-    _, markup = render_notams(notams, "token", 0, "nlD_T")
-    action = next(
-        b for b in buttons(markup) if ":nv" in b.callback_data
-    ).callback_data.split(":")[3]
-    found = 0
-    for page in range(3):
-        text, markup = render_notams(notams, "token", 0, action, page)
-        found += text.split("\n\n")[1].count("X")
+    record.raw = "Ж" * 7500
+    page = found = 0
+    while True:
+        text, markup = render_notams(notams, "token", 0, "nlD_T", page)
+        found += text.count("Ж")
         assert len(text) <= 3800
-    assert found == 7500
+        if not any(b.text == "NEXT" for b in buttons(markup)):
+            break
+        page += 1
+    assert found == 7500 and page >= 2
 
 
 @pytest.fixture
@@ -218,6 +206,8 @@ def identity():
 
 @pytest.mark.asyncio
 async def test_notam_callbacks_and_switches_edit_existing_message(notams, identity):
+    for record in notams.blocks["notams"].details["notams"]["UAAA"]:
+        record.raw += "\n" + "X" * 700
     listing = {
         "scope": (42, None),
         "expires": monotonic() + 60,
@@ -241,7 +231,7 @@ async def test_notam_callbacks_and_switches_edit_existing_message(notams, identi
         u.callback_query.edit_message_text.assert_awaited_once()
         u.effective_message.reply_text.assert_not_awaited()
     u = update(data="fc:token:0:nlD_T:0", chat=123)
-    with pytest.raises(ValueError):
+    with pytest.raises(PermissionError):
         await flight_browser.handle_selection(u, ctx)
 
 

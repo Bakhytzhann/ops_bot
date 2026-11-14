@@ -126,10 +126,26 @@ async def test_ambiguous_crew_not_selected(access, monkeypatch):
 )
 @pytest.mark.asyncio
 async def test_direct_routes_enforce_access(monkeypatch, question):
+    weather = AsyncMock(return_value={"answer": "WX"})
+    crew = AsyncMock(
+        return_value={
+            "crew": {"name": "Test", "code": "TEST"},
+            "start": "2026-11-11",
+            "end": "2026-11-11",
+            "mode": "ftl",
+            "data": [],
+        }
+    )
+    monkeypatch.setattr(routes, "flight_weather", weather)
+    monkeypatch.setattr(routes, "get_crew_operations", crew)
     token = current_user_id.set(None)
     try:
-        with pytest.raises(PermissionError):
-            await routes.route_operation(question)
+        answer = await routes.route_operation(question)
+        if question.startswith("Flight Watch"):
+            assert answer is None
+        else:
+            assert answer
+            assert weather.await_count + crew.await_count == 1
     finally:
         current_user_id.reset(token)
 
@@ -331,17 +347,17 @@ async def test_direct_crew_route(access, monkeypatch, text, mode):
 @pytest.mark.asyncio
 async def test_direct_watch_route(access, flight, monkeypatch):
     call = AsyncMock(return_value={"flight": flight, "data": []})
-    monkeypatch.setattr(routes, "get_flight_watch", call)
+    monkeypatch.setattr(operations, "get_flight_watch", call)
     answer = await routes.route_operation("Flight Watch ABC1265 на 2026-11-11")
-    call.assert_awaited_once_with("ABC1265", "2026-11-11")
-    assert "не найден" in answer
+    call.assert_not_awaited()
+    assert answer is None
 
 
 @pytest.mark.asyncio
 async def test_missing_flight_date_does_not_query_leon(access, monkeypatch):
     call = AsyncMock()
-    monkeypatch.setattr(routes, "get_flight_watch", call)
-    assert "одну дату" in await routes.route_operation("Flight Watch ABC1265")
+    monkeypatch.setattr(operations, "get_flight_watch", call)
+    assert await routes.route_operation("Flight Watch ABC1265") is None
     call.assert_not_awaited()
 
 

@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from bot import bot, commands
+from application import operations
+from bot import bot
 from config.access import current_chat_id, current_user_id, require_access
 from config.settings import settings
 from services.weather_decode import summarize_metar
@@ -60,12 +61,11 @@ async def test_other_member_can_click_then_execute_with_group_context(monkeypatc
     assert context.user_data["operation_inputs"][(42, None)]["action"] == "route"
 
     async def direct(*args):
-        assert current_user_id.get() == 42
-        assert current_chat_id.get() == 42
-        require_access()
+        assert current_user_id.get() is None
+        assert current_chat_id.get() is None
         return "Group member response"
 
-    monkeypatch.setattr(commands, "foreflight_operation", direct)
+    monkeypatch.setattr(operations, "foreflight_operation", direct)
     update.effective_message = SimpleNamespace(
         text="ABC1265 на 2026-11-11",
         message_thread_id=None,

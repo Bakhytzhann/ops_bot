@@ -13,7 +13,7 @@ def update_for(user_id):
     return SimpleNamespace(
         effective_chat=SimpleNamespace(id=user_id, type="private"),
         effective_user=SimpleNamespace(id=user_id, is_bot=False),
-        effective_message=SimpleNamespace(text="@OPS_bot hello"),
+        effective_message=SimpleNamespace(text="/sked"),
     )
 
 
@@ -117,4 +117,4 @@ def test_telegram_concurrency_enabled(monkeypatch):
     monkeypatch.setattr(settings, "telegram_bot_token", SecretStr("123:test"))
     application = bot.create_application()
     assert application.concurrent_updates == settings.telegram_max_parallel
-    assert application.post_init is bot.warmup_model
+    assert application.post_init is bot.setup_telegram

@@ -5,7 +5,6 @@ import math
 import re
 from datetime import timedelta
 
-from config.access import require_access
 from integrations.leon.operations import records
 from integrations.leon.tools import call_leon
 from services.snapshot_models import SourceBlock, utc, zulu
@@ -204,7 +203,6 @@ def duty_rows(roster, ftl, nid):
 
 
 async def load_duty(flight, crew):
-    require_access()
     members = assigned_members(crew, flight["flightNid"])
     if not members:
         return SourceBlock("Leon", "Duty / Rest: назначенный экипаж не предоставлен.")

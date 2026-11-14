@@ -1,6 +1,12 @@
 from telegram import KeyboardButton, ReplyKeyboardMarkup
 
-SCHEDULE_BUTTON = "SKED"
+SCHEDULE_BUTTON = "SCHEDULE"
+HOME_SECTIONS = {
+    "Flight Preparation": "preparation",
+    "Crew & FTL": "crew",
+    "Weather & NOTAM": "weather",
+    "Operational Reports": "reports",
+}
 
 
 def home_keyboard():

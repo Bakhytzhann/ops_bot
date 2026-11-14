@@ -20,25 +20,21 @@ def check_views(snapshot):
     views = 0
     for endpoint, field in (("D", "departure"), ("A", "arrival")):
         groups, _ = notam_sets(snapshot, snapshot.flight.get(field))
-        for selected, records in groups.items():
-            for page in range(max(1, math.ceil(len(records) / 5))):
+        for selected in groups:
+            page = 0
+            while True:
                 text, markup = render_notams(
                     snapshot, "check", 0, f"nl{endpoint}_{selected}", page
                 )
-                if len(text) > 3800:
+                if len(text.encode("utf-16-le")) // 2 > 3800:
                     raise ValueError("NOTAM list exceeds Telegram limit")
                 views += 1
-                for row in markup.inline_keyboard:
-                    for button in row:
-                        if len(button.callback_data.encode()) > 64:
-                            raise ValueError("Callback exceeds Telegram limit")
-                        if ":nv" not in button.callback_data:
-                            continue
-                        action = button.callback_data.split(":")[3]
-                        detail, _ = render_notams(snapshot, "check", 0, action)
-                        if len(detail) > 3800:
-                            raise ValueError("NOTAM text exceeds Telegram limit")
-                        views += 1
+                buttons = [button for row in markup.inline_keyboard for button in row]
+                if any(len(button.callback_data.encode()) > 64 for button in buttons):
+                    raise ValueError("Callback exceeds Telegram limit")
+                if not any(button.text == "NEXT" for button in buttons):
+                    break
+                page += 1
     full = full_weather(snapshot)
     block = snapshot.blocks.get("weather")
     roles = station_roles(snapshot)

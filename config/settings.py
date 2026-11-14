@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: SecretStr | None = None
     telegram_allowed_user_ids: str = ""
+    telegram_admin_ids: str = ""
     telegram_bot_username: str = "OPS_bot"
 
     # Leon Software API
@@ -59,6 +60,14 @@ class Settings(BaseSettings):
     snapshot_briefing_ttl: float = Field(default=300, ge=0)
     snapshot_ftl_ttl: float = Field(default=60, ge=0)
     weather_stale_hours: float = Field(default=2, gt=0)
+
+    @property
+    def admin_ids(self) -> set[int]:
+        return {
+            int(value.strip())
+            for value in self.telegram_admin_ids.split(",")
+            if value.strip()
+        }
 
     @property
     def allowed_user_ids(self) -> set[int]:

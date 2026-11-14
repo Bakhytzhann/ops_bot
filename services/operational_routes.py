@@ -4,35 +4,27 @@ import asyncio
 import re
 from datetime import UTC, datetime
 
-from config.access import require_access
 from integrations.awc.client import get_weather
 from integrations.leon.operations import (
     get_crew_operations,
-    get_flight_watch,
     get_flight_weather_leon,
     resolve_flight,
 )
 from services.operational_format import (
     format_awc_weather,
     format_crew_operations,
-    format_watch,
 )
 from services.schedule_dates import parse_schedule_period
 from services.weather_reports import awc_reports, format_reports, leon_reports
 
 FLIGHT_PATTERN = re.compile(r"\b[A-Z]{2,3}\s*-?\s*\d{1,6}[A-Z]?\b", re.IGNORECASE)
 WEATHER_PATTERN = re.compile(r"погод|metar|taf|метар|таф|\bawc\b", re.IGNORECASE)
-WATCH_PATTERN = re.compile(
-    r"flight\s*watch|флайт\s*в[оа]тч|флайтв[оа]тч|фактическ|\b(?:ctot|etd|eta|tobt|tsat)\b",
-    re.IGNORECASE,
-)
 CREW_PATTERN = re.compile(
     r"\bftl\b|фтл|график(?!\s+(?:рейс|пол[её]т))|(?:roster|дежурств)", re.IGNORECASE
 )
 
 
 async def flight_weather(number: str, date: str, include_taf: bool = False) -> dict:
-    require_access()
     flight = await resolve_flight(number, date)
     return await selected_flight_weather(flight, date, include_taf)
 
@@ -41,7 +33,6 @@ async def selected_flight_weather(
     flight: dict, date: str, include_taf: bool = False
 ) -> dict:
     """Use a verified exact flight NID; identical flight numbers may have many legs."""
-    require_access()
     if type(flight.get("flightNid")) is not int or flight["flightNid"] <= 0:
         raise ValueError("Некорректный идентификатор выбранного рейса.")
     airports = [flight.get("departure"), flight.get("arrival")]
@@ -110,12 +101,10 @@ def _crew_query(text):
 
 async def route_operation(question: str) -> str | None:
     weather = bool(WEATHER_PATTERN.search(question))
-    watch = bool(WATCH_PATTERN.search(question))
     crew = bool(CREW_PATTERN.search(question))
-    if not (weather or watch or crew):
+    if not (weather or crew):
         return None
-    require_access()
-    if weather or watch:
+    if weather:
         include_taf = bool(re.search(r"\b(?:taf|таф)\b", question, re.IGNORECASE))
         match = FLIGHT_PATTERN.search(question)
         if not match:
@@ -126,15 +115,13 @@ async def route_operation(question: str) -> str | None:
                     return format_awc_weather(
                         await get_weather(codes, include_taf=include_taf), include_taf
                     )
-            return "Укажите номер рейса и дату, например: Flight Watch ABC1265 на 2026-11-11."
+            return "Укажите ICAO или номер рейса и дату."
         period = parse_schedule_period(question)
         if not period or period.start != period.end:
             return "Для рейса укажите одну дату (UTC), например 2026-11-11."
         number = re.sub(r"[\s-]", "", match.group()).upper()
         day = period.start.isoformat()
         parts = []
-        if watch:
-            parts.append(format_watch(await get_flight_watch(number, day)))
         if weather:
             parts.append((await flight_weather(number, day, include_taf))["answer"])
         return "\n\n".join(parts)

@@ -31,7 +31,7 @@ async def test_messages_and_buttons_enforce_private_allowlist(
     flow = AsyncMock()
     monkeypatch.setattr(bot, "weekly_flow", flow)
     assert bot.is_allowed(update) is allowed
-    await bot.handle_button(update, SimpleNamespace())
+    await bot.handle_button(update, SimpleNamespace(user_data={}))
     assert flow.await_count == int(allowed)
     if not allowed:
         handler = AsyncMock()

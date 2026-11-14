@@ -3,7 +3,6 @@
 import asyncio
 import re
 
-from config.access import require_access
 from integrations.awc.client import get_weather
 from services.flight_display import airport
 from services.weather_decode import WEATHER
@@ -39,7 +38,6 @@ def station_label(snapshot, code, preferences=None):
 
 
 async def alternate_reports(stations):
-    require_access()
     codes = list(dict.fromkeys(stations))
     batches = [codes[i : i + 4] for i in range(0, len(codes), 4)]
     results = await asyncio.gather(

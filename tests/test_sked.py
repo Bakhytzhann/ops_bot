@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.core import agent
 from bot import bot
 from bot import flight_browser as browser
 from config.access import current_chat_id, current_user_id
@@ -84,14 +85,14 @@ async def test_session_toggles_survive_card_details_and_back(
     load = AsyncMock()
     monkeypatch.setattr(browser, "load_flight_snapshot", load)
     model = AsyncMock()
-    monkeypatch.setattr(bot.agent, "chat", model)
+    monkeypatch.setattr(agent, "chat", model)
     await browser.handle_selection(update(data="sv:token:time"), session)
     await browser.handle_selection(update(data="sv:token:codes"), session)
     card = update(data="fc:token:0:card:0")
     await browser.handle_selection(card, session)
     text = card.callback_query.edit_message_text.call_args.args[0]
     assert "TAS" in text and "UAAA (ICAO)" in text and "1700 LT" in text
-    for action in ("eet", "crew", "duty", "route", "notams", "report", "card"):
+    for action in ("eet", "crew", "duty", "route", "notams", "card"):
         u = update(data=f"fc:token:0:{action}:0")
         await browser.handle_selection(u, session)
         u.callback_query.edit_message_text.assert_awaited()

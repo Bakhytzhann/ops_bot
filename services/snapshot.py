@@ -2,7 +2,6 @@
 
 import asyncio
 
-from config.access import current_chat_id, current_user_id, require_access
 from config.settings import settings
 from integrations.leon.tools import get_flight_crew, get_flight_schedule
 from services.crew_format import format_flight_crew
@@ -19,15 +18,10 @@ cache = SourceCache()
 
 
 async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
-    require_access()
     day = str(selected.get("departureUTC") or "")[:10]
-    scope = (
-        current_chat_id.get(),
-        current_user_id.get() if current_chat_id.get() is None else None,
-    )
 
     async def cached(key, ttl, loader):
-        return await cache.get((scope, *key), ttl, loader, refresh=refresh)
+        return await cache.get(key, ttl, loader, refresh=refresh)
 
     schedule = await cached(
         ("schedule", day),

@@ -1,6 +1,5 @@
-"""Snapshot-scoped NOTAM station/filter lists and complete record views."""
+"""Complete NOTAM lists with text-size pagination and station/filter controls."""
 
-import hashlib
 import re
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -9,123 +8,131 @@ from services.flight_display import flight_reference
 from services.flight_weather import station_label
 from services.notam_filters import FILTERS, notam_sets
 
-PAGE_SIZE = 5
-ACTION = re.compile(r"n([lv])([DA])_([ARCT])(?:_(\d+)_([0-9a-f]{8}))?")
+PAGE_BUDGET = 3800
+SEPARATOR = "\n\n──────────\n\n"
+ACTION = re.compile(r"nl([DA])_([ARCT])")
 
 
 def valid_action(action):
-    match = ACTION.fullmatch(action)
-    return bool(match and ((match[1] == "v") == (match[4] is not None)))
+    return bool(ACTION.fullmatch(action))
+
+
+def _units(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _chunks(text, budget):
+    start = used = 0
+    for index, char in enumerate(text):
+        size = 2 if ord(char) > 0xFFFF else 1
+        if used + size > budget:
+            yield text[start:index]
+            start, used = index, 0
+        used += size
+    yield text[start:]
+
+
+def _record_parts(record, budget):
+    body = (record.topic + "\n" if record.topic else "") + record.raw
+    complete = record.identifier + "\n" + body
+    if _units(complete) <= budget:
+        return [complete]
+    # Reserve enough digits for every possible part number before splitting.
+    bound = len(body)
+    label = f"{record.identifier} · PART {bound}/{bound} · CONTINUED\n"
+    capacity = budget - _units(label)
+    if capacity < 2:
+        raise ValueError("Заголовок NOTAM слишком длинный для сообщения.")
+    chunks = list(_chunks(body, capacity))
+    return [
+        f"{record.identifier} · PART {index}/{len(chunks)}"
+        + (" · CONTINUED" if index > 1 else "")
+        + "\n"
+        + chunk
+        for index, chunk in enumerate(chunks, 1)
+    ]
+
+
+def _pages(records, budget):
+    pages, current, used = [], [], 0
+    for offset, (_, record) in enumerate(records, 1):
+        for text in _record_parts(record, budget):
+            size = _units(text) + (_units(SEPARATOR) if current else 0)
+            if current and used + size > budget:
+                pages.append(current)
+                current, used = [], 0
+                size = _units(text)
+            current.append((offset, text))
+            used += size
+    return [*pages, current] if current else pages or [[]]
 
 
 def render_notams(snapshot, token, position, action, page=0, preferences=None):
     if not valid_action(action):
         raise ValueError("Неизвестный экран NOTAM.")
-    match = ACTION.fullmatch(action)
-    view, endpoint, selected, record_index, fingerprint = match.groups()
+    endpoint, selected = ACTION.fullmatch(action).groups()
     station = snapshot.flight.get("departure" if endpoint == "D" else "arrival")
     groups, recognized = notam_sets(snapshot, station)
     records = groups[selected]
+    role = "DEP" if endpoint == "D" else "ARR"
+    count = len(records)
+    title = f"NOTAM · {role} {station_label(snapshot, station, preferences)} · {FILTERS[selected]} {count if recognized else '—'}"
+    header = flight_reference(snapshot.flight, preferences) + "\n" + title
+    # An upper bound on page count keeps the reserved header width stable.
+    bound = 1 + sum(
+        _units(record.identifier + record.topic + record.raw) + 1
+        for _, record in records
+    )
+    page_line = f"PAGE {bound}/{bound} · {count}–{count} / {count}"
+    budget = PAGE_BUDGET - _units(header + "\n" + page_line + "\n\n")
+    if budget < 100:
+        raise ValueError("Заголовок NOTAM слишком длинный для сообщения.")
+    pages = _pages(records, budget)
+    if not 0 <= page < len(pages):
+        raise ValueError("Страница NOTAM не найдена.")
+    entries = pages[page]
+    first, last = (entries[0][0], entries[-1][0]) if entries else (0, 0)
+    text = f"{header}\nPAGE {page + 1}/{len(pages)} · {first}–{last} / {count}\n\n"
+    text += (
+        SEPARATOR.join(entry for _, entry in entries)
+        if entries
+        else ("нет записей" if recognized else "нет данных")
+    )
 
     def button(label, target, number=0):
         return InlineKeyboardButton(
             label, callback_data=f"fc:{token}:{position}:{target}:{number}"
         )
 
-    def record_action(index, record):
-        digest = hashlib.sha256(record.raw.encode()).hexdigest()[:8]
-        return f"nv{endpoint}_{selected}_{index}_{digest}"
-
-    title = f"NOTAM · {endpoint.replace('D', 'DEP').replace('A', 'ARR')} {station_label(snapshot, station, preferences)} · {FILTERS[selected]}"
-    header = flight_reference(snapshot.flight, preferences) + "\n" + title
-    rows = []
-    if view == "l":
-        pages = max(1, (len(records) + PAGE_SIZE - 1) // PAGE_SIZE)
-        if not 0 <= page < pages:
-            raise ValueError("Страница NOTAM не найдена.")
-        start = page * PAGE_SIZE
-        end = min(start + PAGE_SIZE, len(records))
-        text = f"{header}\nPAGE {page + 1}/{pages} · {start + 1 if records else 0}–{end} / {len(records)}"
-        rows.append(
-            [
-                button(
-                    "DEP "
-                    + station_label(
-                        snapshot, snapshot.flight.get("departure"), preferences
-                    ),
-                    f"nlD_{selected}",
+    rows = [
+        [
+            button(
+                "DEP "
+                + station_label(
+                    snapshot, snapshot.flight.get("departure"), preferences
                 ),
-                button(
-                    "ARR "
-                    + station_label(
-                        snapshot, snapshot.flight.get("arrival"), preferences
-                    ),
-                    f"nlA_{selected}",
-                ),
-            ]
-        )
-        rows.append(
-            [
-                button(
-                    f"{name} {len(groups[key]) if recognized else '—'}",
-                    f"nl{endpoint}_{key}",
-                )
-                for key, name in FILTERS.items()
-            ]
-        )
-        for index, record in records[start:end]:
-            label = record.identifier + (
-                " · " + " ".join(record.topic.split())[:65] if record.topic else ""
+                f"nlD_{selected}",
+            ),
+            button(
+                "ARR "
+                + station_label(snapshot, snapshot.flight.get("arrival"), preferences),
+                f"nlA_{selected}",
+            ),
+        ],
+        [
+            button(
+                f"{name} {len(groups[key]) if recognized else '—'}",
+                f"nl{endpoint}_{key}",
             )
-            rows.append([button(label, record_action(index, record))])
-        if not recognized:
-            text += "\nнет данных"
-        elif not records:
-            text += "\nнет записей"
-        navigation = []
-        if page:
-            navigation.append(button("PREV", action, page - 1))
-        if page + 1 < pages:
-            navigation.append(button("NEXT", action, page + 1))
-        if navigation:
-            rows.append(navigation)
-        rows.append([button("BACK · Flight Card", "card")])
-    else:
-        offset = next(
-            (i for i, (index, _) in enumerate(records) if index == int(record_index)),
-            None,
-        )
-        if offset is None:
-            raise ValueError(
-                "NOTAM изменён или отсутствует в фильтре. Откройте список заново."
-            )
-        _, record = records[offset]
-        if record_action(int(record_index), record).rsplit("_", 1)[1] != fingerprint:
-            raise ValueError("NOTAM изменён. Откройте список заново.")
-        chunks = [
-            record.raw[i : i + 3300] for i in range(0, len(record.raw), 3300)
-        ] or ["нет данных"]
-        if not 0 <= page < len(chunks):
-            raise ValueError("Страница текста NOTAM не найдена.")
-        text = f"{header}\n{record.identifier} · {offset + 1} / {len(records)}\n\n{chunks[page]}"
-        if len(chunks) > 1:
-            text += f"\n\nTEXT PAGE {page + 1}/{len(chunks)}"
-            rows.append(
-                ([button("TEXT PREV", action, page - 1)] if page else [])
-                + (
-                    [button("TEXT NEXT", action, page + 1)]
-                    if page + 1 < len(chunks)
-                    else []
-                )
-            )
-        navigation = []
-        if offset:
-            navigation.append(button("PREV", record_action(*records[offset - 1])))
-        if offset + 1 < len(records):
-            navigation.append(button("NEXT", record_action(*records[offset + 1])))
-        navigation.append(
-            button("BACK", f"nl{endpoint}_{selected}", offset // PAGE_SIZE)
-        )
+            for key, name in FILTERS.items()
+        ],
+    ]
+    navigation = []
+    if page:
+        navigation.append(button("PREVIOUS", action, page - 1))
+    if page + 1 < len(pages):
+        navigation.append(button("NEXT", action, page + 1))
+    if navigation:
         rows.append(navigation)
-        rows.append([button("Flight Card", "card")])
+    rows.append([button("BACK · Flight Card", "card")])
     return text, InlineKeyboardMarkup(rows)

@@ -6,12 +6,14 @@ from time import monotonic
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from application.operations import flight_schedule as get_flight_schedule
+from application.operations import prepare_flight as load_flight_snapshot
+from bot.admission import require_user
+from bot.message_edits import edit_message_text
 from bot.notam_browser import render_notams, valid_action
-from config.access import require_access
-from integrations.leon.tools import get_flight_schedule
 from services.flight_display import airport, flight_date, flight_reference, flight_time
 from services.schedule_dates import parse_schedule_period
-from services.snapshot import load_flight_snapshot, render_snapshot
+from services.snapshot import render_snapshot
 from services.snapshot_models import SourceBlock, utc
 
 PAGE_SIZE = 12
@@ -132,7 +134,7 @@ def render_page(token, listing, page=0):
 async def show_week(
     update, context, *, today=None, search=None, days=3, preferences=None, edit=False
 ):
-    require_access()
+    require_user(update)
     today = today or datetime.now(UTC).date()
     end = today + timedelta(days=days - 1)
     term = None
@@ -206,13 +208,18 @@ async def show_week(
     cache[token] = listing
     text, markup = render_page(token, listing)
     if edit:
-        await update.callback_query.edit_message_text(text, reply_markup=markup)
+        await edit_message_text(update.callback_query, text, reply_markup=markup)
     else:
         await update.effective_message.reply_text(text, reply_markup=markup)
 
 
+def is_summary_callback(data):
+    parts = (data or "").split(":")
+    return len(parts) == 5 and parts[0] == "fc" and parts[3] in {"summary", "report"}
+
+
 async def handle_selection(update, context):
-    require_access()
+    require_user(update)
     query = update.callback_query
     parts = (query.data or "").split(":")
     if (
@@ -229,6 +236,25 @@ async def handle_selection(update, context):
         raise ValueError(
             "Список устарел или открыт в другой теме. Откройте SKED снова."
         )
+    if is_summary_callback(query.data):
+        index = int(position)
+        snapshot = listing.get("snapshots", {}).get(index)
+        navigation = (
+            (getattr(context, "user_data", None) or {})
+            .get("flight_navigation", {})
+            .get(_scope(update))
+        )
+        if (
+            parts[4] != "0"
+            or index >= len(listing["flights"])
+            or snapshot is None
+            or snapshot.flight.get("flightNid")
+            != listing["flights"][index].get("flightNid")
+            or (navigation and navigation.get("return_to") != (token, index))
+        ):
+            raise ValueError("Карточка устарела. Откройте рейс из SKED.")
+        await query.answer("Bot Summary — функция пока не подключена.")
+        return
     preferences = listing.setdefault("preferences", {})
     if kind in {"sv", "sk"}:
         listing["screen_revision"] = listing.get("screen_revision", 0) + 1
@@ -237,7 +263,7 @@ async def handle_selection(update, context):
                 raise ValueError("Неизвестный переключатель.")
             toggle_preference(preferences, position)
             text, markup = render_page(token, listing, listing.get("page", 0))
-            await query.edit_message_text(text, reply_markup=markup)
+            await edit_message_text(query, text, reply_markup=markup)
         else:
             if position not in {"7", "30", "refresh"}:
                 raise ValueError("Неизвестный период SKED.")
@@ -265,7 +291,7 @@ async def handle_selection(update, context):
             getattr(update.effective_message, "text", None) != text
             or getattr(update.effective_message, "reply_markup", None) != markup
         ):
-            await query.edit_message_text(text, reply_markup=markup)
+            await edit_message_text(query, text, reply_markup=markup)
     else:
         if position >= len(listing["flights"]):
             raise ValueError("Рейс не найден в списке. Обновите расписание.")
@@ -282,11 +308,8 @@ async def handle_selection(update, context):
                 "notams",
                 "dep",
                 "arr",
-                "ai",
-                "diff",
                 "route",
                 "eet",
-                "report",
                 "time",
                 "codes",
             }
@@ -297,45 +320,6 @@ async def handle_selection(update, context):
         if action in {"time", "codes"}:
             toggle_preference(preferences, action)
             action = listing.get("action", "card")
-            if action in {"ai", "diff"}:
-                action = "card"
-
-        if action in {"ai", "diff"}:
-            from services.ai_analysis import (
-                analyze_sources,
-                snapshot_diff,
-                snapshot_sources,
-            )
-
-            snapshot = listing.get("snapshots", {}).get(position)
-            if snapshot is None:
-                raise ValueError("Сначала откройте карточку рейса.")
-            if action == "diff":
-                previous = listing.get("previous", {}).get(position)
-                sources = (
-                    {"diff": snapshot_diff(previous, snapshot)} if previous else {}
-                )
-                if sources and not sources["diff"]:
-                    sources = {}
-            else:
-                sources = snapshot_sources(snapshot)
-            text = (
-                await analyze_sources(
-                    sources, (update.effective_chat.id, update.effective_user.id)
-                )
-                if sources
-                else "Нет предыдущей версии или изменений. Нажмите «Обновить»."
-            )
-            # AI must never hold the navigation lock or overwrite a newer screen.
-            if listing["screen_revision"] == revision:
-                await query.edit_message_text(
-                    text[:3800],
-                    reply_markup=card_keyboard(
-                        snapshot, token, position, action, preferences=preferences
-                    ),
-                )
-            return
-
         locks = listing.setdefault("locks", {})
         # Serialize edits of this shared screen, including refresh and back navigation.
         lock = locks.setdefault("screen", asyncio.Lock())
@@ -343,21 +327,22 @@ async def handle_selection(update, context):
             snapshots = listing.setdefault("snapshots", {})
             snapshot = snapshots.get(position)
             if kind == "fl" or snapshot is None or action == "refresh":
-                await query.edit_message_text(
-                    "Загрузка карточки · Leon / ForeFlight / WX…"
+                await edit_message_text(
+                    query, "Загрузка карточки · Leon / ForeFlight / WX…"
                 )
                 progress_lock = asyncio.Lock()
                 last_progress = [""]
 
                 async def progress(partial):
+                    require_user(update)
                     async with progress_lock:
                         text = render_snapshot(partial, preferences)
                         if (
                             listing["screen_revision"] == revision
                             and text != last_progress[0]
                         ):
-                            await query.edit_message_text(
-                                text[:3800], disable_web_page_preview=True
+                            await edit_message_text(
+                                query, text[:3800], disable_web_page_preview=True
                             )
                             last_progress[0] = text
 
@@ -369,6 +354,7 @@ async def handle_selection(update, context):
                 if position in snapshots:
                     listing.setdefault("previous", {})[position] = snapshots[position]
                 snapshots[position] = snapshot
+            require_user(update)
             context.user_data.setdefault("flight_navigation", {})[_scope(update)] = {
                 "selected_flight_id": snapshot.flight["flightNid"],
                 "return_to": (token, position),
@@ -387,7 +373,9 @@ async def handle_selection(update, context):
                     "include_taf"
                 )
             ):
-                from services.operational_routes import selected_flight_weather
+                from application.operations import (
+                    selected_weather as selected_flight_weather,
+                )
 
                 try:
                     result = await asyncio.wait_for(
@@ -433,8 +421,8 @@ async def handle_selection(update, context):
                 getattr(update.effective_message, "text", None) != text
                 or getattr(update.effective_message, "reply_markup", None) != markup
             ):
-                await query.edit_message_text(
-                    text, reply_markup=markup, disable_web_page_preview=True
+                await edit_message_text(
+                    query, text, reply_markup=markup, disable_web_page_preview=True
                 )
 
 
@@ -447,7 +435,6 @@ def card_keyboard(
         )
 
     rows = [
-        [button("Bot Report", "report")],
         [button("DUTY / REST", "duty"), button("WX / TAF", "weather")],
         [button("RTE / ALTN", "route"), button("NOTAM", "notams")],
         preference_buttons(token, preferences or {}, position=position),
@@ -459,6 +446,7 @@ def card_keyboard(
         )
     if action not in {"card", "refresh"}:
         rows.append([button("← К рейсу", "card")])
+    rows.append([button("Bot Summary", "summary")])
     rows.append(
         [
             button("REFRESH", "refresh"),
@@ -471,8 +459,8 @@ def card_keyboard(
 
 
 def card_detail(snapshot, action, preferences=None):
-    if action in {"card", "refresh", "report"}:
-        return render_snapshot(snapshot, preferences, report=action == "report")
+    if action in {"card", "refresh"}:
+        return render_snapshot(snapshot, preferences)
     if action == "weather":
         from services.flight_weather import full_weather
 

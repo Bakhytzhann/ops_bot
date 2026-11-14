@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.core import agent
 from bot import bot
 from bot import flight_browser as browser
 from bot.keyboards import SCHEDULE_BUTTON, home_keyboard
@@ -158,13 +159,13 @@ async def test_week_command_and_persistent_button_bypass_model(
     context, monkeypatch, text
 ):
     async def show(u, c):
-        assert current_user_id.get() == 42
-        assert current_chat_id.get() == 42
+        assert current_user_id.get() is None
+        assert current_chat_id.get() is None
 
     show_mock = AsyncMock(side_effect=show)
     model = AsyncMock()
     monkeypatch.setattr(bot, "show_week", show_mock)
-    monkeypatch.setattr(bot.agent, "chat", model)
+    monkeypatch.setattr(agent, "chat", model)
     previous = current_chat_id.get()
     await bot.handle_message(update(text=text), context)
     show_mock.assert_awaited_once()
@@ -321,8 +322,6 @@ async def test_search_keeps_ambiguous_matches_as_exact_flight_buttons(
 async def test_ai_does_not_block_back_navigation_or_overwrite_new_screen(
     context, identity, monkeypatch
 ):
-    import asyncio
-
     from services import ai_analysis
 
     snapshot = FlightSnapshot(flight(111))
@@ -337,20 +336,13 @@ async def test_ai_does_not_block_back_navigation_or_overwrite_new_screen(
             "complete": True,
         }
     }
-    started, finish = asyncio.Event(), asyncio.Event()
-
-    async def analyze(*args):
-        started.set()
-        await finish.wait()
-        return "AI result"
-
+    analyze = AsyncMock()
     monkeypatch.setattr(ai_analysis, "analyze_sources", analyze)
     ai = update(data="fc:token:0:ai:0")
-    task = asyncio.create_task(browser.handle_selection(ai, context))
-    await asyncio.wait_for(started.wait(), timeout=1)
+    with pytest.raises(ValueError):
+        await browser.handle_selection(ai, context)
     back = update(data="wk:token:0")
-    await asyncio.wait_for(browser.handle_selection(back, context), timeout=1)
-    finish.set()
-    await task
+    await browser.handle_selection(back, context)
+    analyze.assert_not_awaited()
     ai.callback_query.edit_message_text.assert_not_awaited()
     back.callback_query.edit_message_text.assert_awaited_once()

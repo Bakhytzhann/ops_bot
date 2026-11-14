@@ -3,7 +3,6 @@
 import re
 from datetime import date
 
-from config.access import require_access
 from integrations.leon.tools import call_leon, get_flight_schedule
 from services.schedule_dates import SchedulePeriod
 
@@ -22,7 +21,6 @@ def records(data):
 
 
 async def resolve_flight(number: str, day: str) -> dict:
-    require_access()
     number = re.sub(r"[\s-]", "", number).upper()
     if not re.fullmatch(r"[A-Z]{2,3}\d{1,6}[A-Z]?", number):
         raise ValueError("Укажите номер рейса, например ABC1265, и дату.")
@@ -49,7 +47,6 @@ async def resolve_flight(number: str, day: str) -> dict:
 
 
 async def get_flight_watch(number: str, date: str) -> dict:
-    require_access()
     flight = await resolve_flight(number, date)
     data = await call_leon(
         "get-flight-watch-by-flight-nids", {"flightNids": [flight["flightNid"]]}
@@ -58,7 +55,6 @@ async def get_flight_watch(number: str, date: str) -> dict:
 
 
 async def get_flight_weather_leon(flight: dict) -> list:
-    require_access()
     return records(
         await call_leon(
             "get-weather-for-flight-list", {"flightNids": [flight["flightNid"]]}
@@ -67,7 +63,6 @@ async def get_flight_weather_leon(flight: dict) -> list:
 
 
 async def resolve_crew(query: str) -> dict:
-    require_access()
     if not query.strip() or len(query) > 100:
         raise ValueError("Укажите имя или код сотрудника.")
     data = records(await call_leon("get-crew-by-wildcard", {"wildcard": query.strip()}))
@@ -135,7 +130,6 @@ async def resolve_crew(query: str) -> dict:
 async def get_crew_operations(
     crew: str, start_date: str, end_date: str, mode: str = "roster"
 ) -> dict:
-    require_access()
     period = SchedulePeriod(
         date.fromisoformat(start_date), date.fromisoformat(end_date)
     )

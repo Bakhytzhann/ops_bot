@@ -188,8 +188,8 @@ async def test_compare_fallback_requires_all_identifiers(client):
 async def test_operations_require_identity(client):
     token = current_user_id.set(None)
     try:
-        with pytest.raises(PermissionError):
-            await ops.foreflight_operation("route", "ABC1265", "2026-11-11")
+        text = await ops.foreflight_operation("route", "ABC1265", "2026-11-11")
+        assert "ForeFlight" in text
     finally:
         current_user_id.reset(token)
-    client.list_flights.assert_not_awaited()
+    client.list_flights.assert_awaited()

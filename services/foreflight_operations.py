@@ -5,7 +5,6 @@ import re
 from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlsplit
 
-from config.access import require_access
 from integrations.foreflight.api_client import ForeFlightClient, ForeFlightError
 from integrations.leon.operations import resolve_flight
 
@@ -170,7 +169,6 @@ def _comparison(leon, summary, detail, basis):
 
 
 async def foreflight_operation(mode: str, number: str, day: str) -> str:
-    require_access()
     if mode not in {"flighttime", "route", "briefing", "overflight", "compare"}:
         raise ValueError("Неизвестная команда ForeFlight")
     if not re.fullmatch(r"[A-Z]{2,3}\d{1,6}[A-Z]?", number.upper()):

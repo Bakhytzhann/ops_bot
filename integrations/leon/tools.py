@@ -1,7 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from config.access import require_access
 from integrations.leon.mcp_client import leon_mcp
 from services.schedule_dates import SchedulePeriod
 
@@ -88,7 +87,6 @@ def make_flight_search_arguments(
 
 
 async def get_flight_schedule(date: str, end_date: str | None = None) -> dict:
-    require_access()
 
     day = datetime.strptime(date, "%Y-%m-%d").date()
     last_day = datetime.strptime(end_date or date, "%Y-%m-%d").date()
@@ -185,7 +183,6 @@ async def get_flight_schedule(date: str, end_date: str | None = None) -> dict:
 
 
 async def get_flight_crew(flight_nid: int) -> dict:
-    require_access()
 
     data = await call_leon(
         "get-flights-crew",

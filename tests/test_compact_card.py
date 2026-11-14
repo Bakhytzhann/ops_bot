@@ -139,10 +139,10 @@ def test_card_is_compact_without_repeated_source_boilerplate(card):
 def test_card_buttons_exact_and_switch_directions(card):
     markup = ui.card_keyboard(card, "token", 0)
     assert [[b.text for b in row] for row in markup.inline_keyboard] == [
-        ["Bot Report"],
         ["DUTY / REST", "WX / TAF"],
         ["RTE / ALTN", "NOTAM"],
         ["Z → LT", "ICAO → IATA"],
+        ["Bot Summary"],
         ["REFRESH", "← SKED"],
     ]
     buttons = ui.preference_buttons("token", {"time": "LT", "codes": "IATA"})
@@ -307,7 +307,6 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
             ("weather", 1),
             ("route", 0),
             ("notams", 0),
-            ("report", 0),
             ("card", 0),
             ("refresh", 0),
         ):
