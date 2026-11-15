@@ -2,7 +2,7 @@ from telegram import KeyboardButton, ReplyKeyboardMarkup
 
 SCHEDULE_BUTTON = "SKED"
 HOME_SECTIONS = {
-    "PREFLIGHT": "preparation",
+    "FLEET DOCS": "fleet_docs",
     "ANALYTICS": "reports",
 }
 HOME_PLACEHOLDERS = {
@@ -12,7 +12,7 @@ HOME_PLACEHOLDERS = {
 }
 QUICK_ACTIONS = (
     ("GROUND STATUS", "SKED", "OPS BRIEF"),
-    ("PREFLIGHT", "ANALYTICS", "CHARTER CHECK"),
+    ("FLEET DOCS", "ANALYTICS", "CHARTER CHECK"),
 )
 
 
