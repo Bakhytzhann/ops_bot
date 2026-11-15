@@ -1,14 +1,13 @@
 from telegram import KeyboardButton, ReplyKeyboardMarkup
 
-SCHEDULE_BUTTON = "Расписание"
+SCHEDULE_BUTTON = "SKED"
 HOME_SECTIONS = {
-    "Подготовка": "preparation",
-    "Аналитика": "reports",
+    "PREFLIGHT": "preparation",
+    "ANALYTICS": "reports",
 }
 QUICK_ACTIONS = (
-    ("Расписание", "Сводка"),
-    ("Аналитика", "Поиск"),
-    ("Подготовка", "СЛОТ"),
+    ("SKED", "OPS BRIEF", "ANALYTICS"),
+    ("FLT SEARCH", "PREFLIGHT", "SLOT"),
 )
 
 
