@@ -528,7 +528,7 @@ def card_keyboard(
         [
             button("REFRESH", "refresh"),
             InlineKeyboardButton(
-                "← SKED", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
+                "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
             ),
         ]
     )
