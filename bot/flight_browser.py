@@ -411,7 +411,7 @@ async def handle_selection(update, context):
             )
 
             try:
-                                result = await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     selected_flight_weather(
                         snapshot.flight,
                         snapshot.flight["departureUTC"][:10],
