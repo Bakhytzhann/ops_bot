@@ -40,7 +40,7 @@ from bot.flight_browser import (
     is_card_notice_callback,
     show_week,
 )
-from bot.keyboards import HOME_SECTIONS, SCHEDULE_BUTTON, home_keyboard
+from bot.keyboards import HOME_PLACEHOLDERS, HOME_SECTIONS, SCHEDULE_BUTTON, home_keyboard
 from bot.message_edits import edit_message_text
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
@@ -89,7 +89,7 @@ def accepts_message(update, context):
             parsed_command(message.text)
             or message.text.strip() == SCHEDULE_BUTTON
             or message.text.strip() in HOME_SECTIONS
-            or message.text.strip() in {"Сводка", "Поиск", "СЛОТ"}
+            or message.text.strip() in HOME_PLACEHOLDERS
             or pending_reply(update, context)
         )
     )
@@ -250,7 +250,7 @@ async def _handle_message(update, context):
         )
         await weekly_flow(update, context)
         return
-    if text in HOME_SECTIONS or text in {"Сводка", "Поиск", "СЛОТ"} or (
+    if text in HOME_SECTIONS or text in HOME_PLACEHOLDERS or (
         command and command[0] in {"start", "menu", "help", "cancel", "access"}
     ):
         context.user_data.setdefault("operation_inputs", {}).pop(
@@ -259,9 +259,7 @@ async def _handle_message(update, context):
         invalidate_screen(update, context)
         if command and command[0] == "access":
             await show_access(update, context)
-        elif text == "Поиск":
-            await prompt_for_input(update, context, "search")
-        elif text in {"Сводка", "СЛОТ"}:
+        elif text in HOME_PLACEHOLDERS:
             await message.reply_text(
                 f"{text}: функция пока не подключена.", reply_markup=home_keyboard()
             )
