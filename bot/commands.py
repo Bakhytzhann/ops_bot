@@ -78,13 +78,19 @@ COMMANDS.update(
 
 MENU_GROUPS = {
     "preparation": (
-        "Flight Preparation",
-        ("search", "prepare", "crew", "route", "briefing", "flighttime", "overflight"),
+        "Предполётная подготовка",
+        (
+            "search", "prepare", "crew", "roster", "duty", "ftl",
+            "violations", "weather", "notams", "route", "briefing",
+            "flighttime", "overflight",
+        ),
     ),
-    "crew": ("Crew & FTL", ("crew", "roster", "duty", "ftl", "violations")),
-    "weather": ("Weather & NOTAM", ("weather", "notams")),
-    "reports": ("Operational Reports", ("flights", "compare", "report")),
+    "reports": (
+        "Аналитика / Отчёты",
+        ("report", "flights"),
+    ),
 }
+
 
 
 def help_text():
