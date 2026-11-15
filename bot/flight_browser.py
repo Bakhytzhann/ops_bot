@@ -10,7 +10,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from application.operations import flight_schedule as get_flight_schedule
 from application.operations import prepare_flight as load_flight_snapshot
 from bot.admission import require_user
-from bot.main_screen import loading
 from bot.message_edits import edit_message_text
 from bot.notam_browser import render_notams, valid_action
 from services.flight_display import airport, flight_date, flight_reference, flight_time
@@ -64,7 +63,7 @@ def preference_buttons(token, preferences, *, position=None):
     local = preferences.get("time") == "LT" and preferences.get("codes") == "IATA"
     return [
         InlineKeyboardButton(
-            "Zulu/ICAO" if local else "Local Time/IATA", callback_data=callback
+            "UTC · ICAO" if local else "LT · IATA", callback_data=callback
         )
     ]
 
@@ -127,7 +126,7 @@ def render_page(token, listing, page=0):
     rows.append(
         [
             InlineKeyboardButton(
-                "UTC" if preferences.get("time") == "LT" else "LT",
+                "UTC · ICAO" if preferences.get("time") == "LT" else "LT · IATA",
                 callback_data=f"sv:{token}:view",
             )
         ]
@@ -141,7 +140,6 @@ def render_page(token, listing, page=0):
     rows.append(
         [
             InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh"),
-            InlineKeyboardButton("SKED", callback_data="op:week"),
         ]
     )
     state = (
@@ -157,8 +155,9 @@ def render_page(token, listing, page=0):
     )
     if not listing["complete"]:
         text += "\nРасписание неполное: нет данных по части рейсов."
-    if preferences.get("time") == "LT":
-        text += "\nLT"
+    text += "\nРежим: " + (
+        "LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"
+    )
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -183,7 +182,6 @@ async def show_week(
             raise ValueError("Не распознана дата поиска.")
         if period:
             today, end = period.start, period.end
-    await loading(update)
     try:
         result = await get_flight_schedule(today.isoformat(), end.isoformat())
     except PermissionError:
@@ -247,11 +245,7 @@ async def show_week(
 
 def is_card_notice_callback(data):
     parts = (data or "").split(":")
-    return (
-        len(parts) == 5
-        and parts[0] == "fc"
-        and parts[3] in {"summary", "report", "briefing"}
-    )
+    return len(parts) == 5 and parts[0] == "fc" and parts[3] == "briefing"
 
 
 async def handle_selection(update, context):
@@ -289,12 +283,9 @@ async def handle_selection(update, context):
             or (navigation and navigation.get("return_to") != (token, index))
         ):
             raise ValueError("Карточка устарела. Откройте рейс из SKED.")
-        if parts[3] == "briefing":
-            await query.answer(
-                "Брифинг ForeFlight недоступен. Нажмите REFRESH.", show_alert=True
-            )
-        else:
-            await query.answer("Bot Summary — функция пока не подключена.")
+        await query.answer(
+            "Брифинг ForeFlight недоступен. Нажмите REFRESH.", show_alert=True
+        )
         return
     preferences = listing.setdefault("preferences", {})
     if kind in {"sv", "sk"}:
@@ -362,122 +353,120 @@ async def handle_selection(update, context):
         if action in {"view", "time", "codes"}:
             toggle_preference(preferences, action)
             action = listing.get("action", "card")
-        locks = listing.setdefault("locks", {})
-        # Serialize edits of this shared screen, including refresh and back navigation.
-        lock = locks.setdefault("screen", asyncio.Lock())
-        async with lock:
-            snapshots = listing.setdefault("snapshots", {})
-            snapshot = snapshots.get(position)
-            if kind == "fl" or snapshot is None or action == "refresh":
-                await edit_message_text(query, "LOADING…")
-                progress_lock = asyncio.Lock()
-                last_progress = [""]
+        snapshots = listing.setdefault("snapshots", {})
+        snapshot = snapshots.get(position)
+        if kind == "fl" or snapshot is None or action == "refresh":
+            progress_lock = asyncio.Lock()
+            last_progress = [""]
 
-                async def progress(partial):
-                    require_user(update)
-                    async with progress_lock:
-                        text = render_snapshot(partial, preferences)
-                        if (
-                            listing["screen_revision"] == revision
-                            and text != last_progress[0]
-                        ):
-                            await edit_message_text(
-                                query,
-                                text[:3800],
-                                disable_web_page_preview=True,
-                                entities=card_entities(
-                                    text[:3800], partial, preferences
-                                ),
-                            )
-                            last_progress[0] = text
+            async def progress(partial):
+                require_user(update)
+                async with progress_lock:
+                    text = render_snapshot(partial, preferences)
+                    if (
+                        listing["screen_revision"] == revision
+                        and text != last_progress[0]
+                    ):
+                        await edit_message_text(
+                            query,
+                            text[:3800],
+                            disable_web_page_preview=True,
+                            entities=card_entities(text[:3800], partial, preferences),
+                        )
+                        last_progress[0] = text
 
-                snapshot = await load_flight_snapshot(
-                    listing["flights"][position],
-                    refresh=action == "refresh",
-                    on_update=progress,
+            snapshot = await load_flight_snapshot(
+                listing["flights"][position],
+                refresh=action == "refresh",
+                on_update=None if getattr(update, "main_screen", None) else progress,
+            )
+            if position in snapshots:
+                listing.setdefault("previous", {})[position] = snapshots[position]
+            snapshots[position] = snapshot
+        require_user(update)
+        screen = getattr(update, "main_screen", None)
+        if listing["screen_revision"] != revision or (
+            screen is not None
+            and screen.generation != context.user_data.get("screen_generation", 0)
+        ):
+            return
+        context.user_data.setdefault("flight_navigation", {})[_scope(update)] = {
+            "selected_flight_id": snapshot.flight["flightNid"],
+            "return_to": (token, position),
+            "selected_station": snapshot.flight.get(
+                "departure" if action == "dep" else "arrival"
+            )
+            if action in {"dep", "arr"}
+            else None,
+        }
+        if listing["screen_revision"] != revision:
+            return
+        if (
+            action == "weather"
+            and "weather_taf" not in snapshot.blocks
+            and not snapshot.blocks.get("weather", SourceBlock("WX")).details.get(
+                "include_taf"
+            )
+        ):
+            from application.operations import (
+                selected_weather as selected_flight_weather,
+            )
+
+            try:
+                result = await asyncio.wait_for(
+                    selected_flight_weather(
+                        snapshot.flight,
+                        snapshot.flight["departureUTC"][:10],
+                        include_taf=True,
+                    ),
+                    timeout=30,
                 )
-                if position in snapshots:
-                    listing.setdefault("previous", {})[position] = snapshots[position]
-                snapshots[position] = snapshot
-            require_user(update)
-            context.user_data.setdefault("flight_navigation", {})[_scope(update)] = {
-                "selected_flight_id": snapshot.flight["flightNid"],
-                "return_to": (token, position),
-                "selected_station": snapshot.flight.get(
-                    "departure" if action == "dep" else "arrival"
+                snapshot.blocks["weather_taf"] = SourceBlock(
+                    "Leon / AWC",
+                    result["answer"],
+                    "partial" if result.get("partial") else "ready",
                 )
-                if action in {"dep", "arr"}
-                else None,
-            }
+            except (TimeoutError, OSError):
+                snapshot.blocks["weather_taf"] = SourceBlock(
+                    "WX", "TAF: источник недоступен; METAR на основном экране."
+                )
             if listing["screen_revision"] != revision:
                 return
-            if (
-                action == "weather"
-                and "weather_taf" not in snapshot.blocks
-                and not snapshot.blocks.get("weather", SourceBlock("WX")).details.get(
-                    "include_taf"
-                )
-            ):
-                from application.operations import (
-                    selected_weather as selected_flight_weather,
-                )
-
-                try:
-                    await loading(update)
-                    result = await asyncio.wait_for(
-                        selected_flight_weather(
-                            snapshot.flight,
-                            snapshot.flight["departureUTC"][:10],
-                            include_taf=True,
-                        ),
-                        timeout=30,
-                    )
-                    snapshot.blocks["weather_taf"] = SourceBlock(
-                        "Leon / AWC",
-                        result["answer"],
-                        "partial" if result.get("partial") else "ready",
-                    )
-                except (TimeoutError, OSError):
-                    snapshot.blocks["weather_taf"] = SourceBlock(
-                        "WX", "TAF: источник недоступен; METAR на основном экране."
-                    )
-                if listing["screen_revision"] != revision:
-                    return
-            if action in {"notams", "dep", "arr"}:
-                action = "nlA_A" if action == "arr" else "nlD_A"
-            listing["action"] = action
-            page = int(page)
-            if valid_action(action):
-                text, markup = render_notams(
-                    snapshot, token, position, action, page, preferences
-                )
-            else:
-                text = card_detail(snapshot, action, preferences)
-                pages = [text[i : i + 3800] for i in range(0, len(text), 3800)] or [
-                    "нет данных"
-                ]
-                if page >= len(pages):
-                    raise ValueError("Страница карточки не найдена.")
-                text = pages[page]
-                markup = card_keyboard(
-                    snapshot, token, position, action, page, len(pages), preferences
-                )
-            # Telegram rejects identical edits; avoid unnecessary errors on repeated taps.
-            if (
-                getattr(update.effective_message, "text", None) != text
-                or getattr(update.effective_message, "reply_markup", None) != markup
-            ):
-                await edit_message_text(
-                    query,
-                    text,
-                    reply_markup=markup,
-                    disable_web_page_preview=True,
-                    **(
-                        {"entities": card_entities(text, snapshot, preferences)}
-                        if action in {"card", "refresh"}
-                        else {}
-                    ),
-                )
+        if action in {"notams", "dep", "arr"}:
+            action = "nlA_A" if action == "arr" else "nlD_A"
+        listing["action"] = action
+        page = int(page)
+        if valid_action(action):
+            text, markup = render_notams(
+                snapshot, token, position, action, page, preferences
+            )
+        else:
+            text = card_detail(snapshot, action, preferences)
+            pages = [text[i : i + 3800] for i in range(0, len(text), 3800)] or [
+                "нет данных"
+            ]
+            if page >= len(pages):
+                raise ValueError("Страница карточки не найдена.")
+            text = pages[page]
+            markup = card_keyboard(
+                snapshot, token, position, action, page, len(pages), preferences
+            )
+        # Telegram rejects identical edits; avoid unnecessary errors on repeated taps.
+        if (
+            getattr(update.effective_message, "text", None) != text
+            or getattr(update.effective_message, "reply_markup", None) != markup
+        ):
+            await edit_message_text(
+                query,
+                text,
+                reply_markup=markup,
+                disable_web_page_preview=True,
+                **(
+                    {"entities": card_entities(text, snapshot, preferences)}
+                    if action in {"card", "refresh"}
+                    else {}
+                ),
+            )
 
 
 def card_entities(text, snapshot, preferences=None):
@@ -537,12 +526,11 @@ def card_keyboard(
         )
     if action not in {"card", "refresh"}:
         rows.append([button("← К рейсу", "card")])
-    rows.append([button("Bot Summary", "summary")])
     rows.append(
         [
             button("REFRESH", "refresh"),
             InlineKeyboardButton(
-                "← SKED", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
+                "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
             ),
         ]
     )

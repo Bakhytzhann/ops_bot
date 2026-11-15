@@ -5,8 +5,6 @@ of message ownership. Access notifications remain separate from navigation.
 """
 
 import asyncio
-import logging
-import sqlite3
 from secrets import token_hex
 from weakref import WeakValueDictionary
 
@@ -16,13 +14,12 @@ from telegram import (
     InlineKeyboardMarkup,
     MessageEntity,
 )
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest
 
 from bot.keyboards import home_keyboard
-from config.settings import settings
 
-_locks = WeakValueDictionary()
-logger = logging.getLogger(__name__)
+_write_locks = WeakValueDictionary()
+
 PAGE_SIZE = 3900
 
 
@@ -42,34 +39,13 @@ def text_pages(text):
     return pages
 
 
-def screen_message_id(chat_id, user_id, message_id=None):
-    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(settings.database_path) as db:
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS bot_main_screens "
-            "(chat_id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, "
-            "message_id INTEGER NOT NULL)"
-        )
-        if message_id is not None:
-            db.execute(
-                "INSERT INTO bot_main_screens VALUES (?, ?, ?) "
-                "ON CONFLICT(chat_id) DO UPDATE SET "
-                "user_id=excluded.user_id, message_id=excluded.message_id",
-                (chat_id, user_id, message_id),
-            )
-        row = db.execute(
-            "SELECT message_id FROM bot_main_screens WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id),
-        ).fetchone()
-    return row[0] if row else None
-
-
 class MainScreen:
     def __init__(self, update, context):
         self.context = context
         self.chat_id = update.effective_chat.id
         self.user_id = update.effective_user.id
-        self.message_id = screen_message_id(self.chat_id, self.user_id)
+        self.message_id = context.user_data.get("main_screen_message_id")
+        self.generation = context.user_data.get("screen_generation", 0)
         self.keyboard_installed = False
 
     async def install_keyboard(self):
@@ -93,20 +69,36 @@ class MainScreen:
         elif not isinstance(markup, InlineKeyboardMarkup):
             markup = None
         rows = list(markup.inline_keyboard) if markup else []
-        if not any(b.callback_data == "op:menu" for row in rows for b in row):
-            rows.append([InlineKeyboardButton("Меню", callback_data="op:menu")])
+        rows = [
+            [button for button in row if button.callback_data != "op:menu"]
+            for row in rows
+        ]
+        rows = [row for row in rows if row]
+        if self.context.user_data.get("screen_back"):
+            rows.append([InlineKeyboardButton("← Назад", callback_data="screen:back")])
         markup = InlineKeyboardMarkup(rows)
         # Generic reports used to be sent as multiple messages. Keep every page
         # available through inline navigation instead of overwriting each chunk.
         pages = text_pages(text)
         token = token_hex(6)
         state = {"token": token, "pages": pages, "markup": markup, "kwargs": kwargs}
+        if self.generation != self.context.user_data.get("screen_generation", 0):
+            return None
         self.context.user_data["main_screen_pages"] = state
         return await self.page(state, 0)
 
     async def page(self, state, index):
+        if self.generation != self.context.user_data.get("screen_generation", 0):
+            return None
         pages = state["pages"]
-        rows = list(state["markup"].inline_keyboard)
+        state["page"] = index
+        rows = [
+            [b for b in row if b.callback_data != "screen:back"]
+            for row in state["markup"].inline_keyboard
+        ]
+        rows = [row for row in rows if row]
+        if self.context.user_data.get("screen_back"):
+            rows.append([InlineKeyboardButton("← Назад", callback_data="screen:back")])
         if len(pages) > 1:
             navigation = []
             if index:
@@ -154,34 +146,42 @@ class MainScreen:
         )
 
     async def _write(self, text, **kwargs):
-        bot = self.context.bot
-        if self.message_id is not None:
-            try:
-                return await bot.edit_message_text(
-                    chat_id=self.chat_id,
-                    message_id=self.message_id,
-                    text=text,
-                    **kwargs,
-                )
-            except BadRequest as exc:
-                error = str(exc).lower()
-                if error.startswith("message is not modified"):
-                    return self
-                if not any(
-                    reason in error
-                    for reason in (
-                        "message to edit not found",
-                        "message can't be edited",
-                        "message_id_invalid",
+        # Serialize writes, not the upstream API requests. A later button press
+        # invalidates earlier responses without holding up new navigation.
+        key = (self.chat_id, self.user_id)
+        lock = _write_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            if self.generation != self.context.user_data.get("screen_generation", 0):
+                return None
+            self.message_id = self.context.user_data.get("main_screen_message_id")
+            bot = self.context.bot
+            if self.message_id is not None:
+                try:
+                    return await bot.edit_message_text(
+                        chat_id=self.chat_id,
+                        message_id=self.message_id,
+                        text=text,
+                        **kwargs,
                     )
-                ):
-                    raise
-        elif not self.keyboard_installed:
-            await self.install_keyboard()
-        message = await bot.send_message(chat_id=self.chat_id, text=text, **kwargs)
-        self.message_id = message.message_id
-        screen_message_id(self.chat_id, self.user_id, self.message_id)
-        return message
+                except BadRequest as exc:
+                    error = str(exc).lower()
+                    if error.startswith("message is not modified"):
+                        return self
+                    if not any(
+                        reason in error
+                        for reason in (
+                            "message to edit not found",
+                            "message can't be edited",
+                            "message_id_invalid",
+                        )
+                    ):
+                        raise
+            elif not self.keyboard_installed:
+                await self.install_keyboard()
+            message = await bot.send_message(chat_id=self.chat_id, text=text, **kwargs)
+            self.message_id = message.message_id
+            self.context.user_data["main_screen_message_id"] = self.message_id
+            return message
 
 
 class ScreenMessage:
@@ -230,69 +230,92 @@ class ScreenUpdate:
         return ScreenCallback(query, self.main_screen) if query else None
 
 
-async def loading(update):
-    screen = getattr(update, "main_screen", None)
-    if screen is not None:
-        await screen.render("LOADING…")
-
-
 async def dispatch_screen(update, context, handler):
-    # Import locally to keep the transport reusable without an import cycle.
     from bot.admission import is_allowed
 
     if not is_allowed(update):
         return await handler(update, context)
-    key = (update.effective_chat.id, update.effective_user.id)
-    lock = _locks.setdefault(key, asyncio.Lock())
-    async with lock:
-        if not is_allowed(update):
-            return await handler(update, context)
-        screen = MainScreen(update, context)
-        query = getattr(update, "callback_query", None)
-        if query and query.message.message_id != screen.message_id:
+
+    query = getattr(update, "callback_query", None)
+    text = getattr(update.effective_message, "text", "") or ""
+    restarting = (
+        not query and text.split(" ", 1)[0].split("@", 1)[0].lower() == "/start"
+    )
+    known_id = context.user_data.get("main_screen_message_id")
+    if query and query.message.message_id != known_id:
+        await query.answer(
+            "Экран устарел. Выберите раздел на нижней клавиатуре.",
+            show_alert=True,
+        )
+        return
+
+    if query and (query.data or "").startswith("screen:"):
+        parts = query.data.split(":")
+        if query.data == "screen:back":
+            previous = context.user_data.pop("screen_back", None)
+            if not previous:
+                await query.answer("Предыдущий экран уже недоступен.", show_alert=True)
+                return
+            context.user_data["screen_generation"] = (
+                context.user_data.get("screen_generation", 0) + 1
+            )
+            screen = MainScreen(update, context)
+            context.user_data["main_screen_pages"] = previous
+            await query.answer()
+            return await screen.page(previous, previous.get("page", 0))
+        state = context.user_data.get("main_screen_pages")
+        if (
+            len(parts) != 3
+            or not state
+            or parts[1] != state["token"]
+            or not parts[2].isdigit()
+            or int(parts[2]) >= len(state["pages"])
+        ):
             await query.answer(
-                "Экран устарел. Выберите раздел на клавиатуре.", show_alert=True
+                "Страница устарела. Откройте раздел снова.", show_alert=True
             )
             return
-        managed = ScreenUpdate(update, screen)
-        if query and (query.data or "").startswith("screen:"):
-            parts = query.data.split(":")
-            state = context.user_data.get("main_screen_pages")
-            if (
-                len(parts) != 3
-                or not state
-                or parts[1] != state["token"]
-                or not parts[2].isdigit()
-                or int(parts[2]) >= len(state["pages"])
-            ):
-                await query.answer(
-                    "Страница устарела. Откройте раздел снова.", show_alert=True
-                )
-                return
-            await query.answer()
-            await screen.page(state, int(parts[2]))
-            return
-        text = getattr(update.effective_message, "text", "") or ""
-        restarting = (
-            not query and text.split(" ", 1)[0].split("@", 1)[0].lower() == "/start"
+        context.user_data["screen_generation"] = (
+            context.user_data.get("screen_generation", 0) + 1
         )
-        old_id = screen.message_id
-        if restarting:
-            # Clearing a chat is not reliably reported as an edit failure.
-            # Explicit /start must send a fresh visible screen even when the
-            # API still accepts edits of a message hidden from the user's chat.
-            screen.message_id = None
-            for name in ("operation_inputs", "flight_navigation", "main_screen_pages"):
-                context.user_data.pop(name, None)
-            await screen.install_keyboard()
-        result = await handler(managed, context)
-        if restarting and old_id and screen.message_id and old_id != screen.message_id:
-            try:
-                await context.bot.delete_message(
-                    chat_id=screen.chat_id, message_id=old_id
-                )
-            except TelegramError:
-                logger.warning(
-                    "New main screen created; old screen could not be removed"
-                )
-        return result
+        screen = MainScreen(update, context)
+        await query.answer()
+        return await screen.page(state, int(parts[2]))
+
+    if restarting:
+        context.user_data.pop("main_screen_message_id", None)
+        for name in (
+            "operation_inputs",
+            "flight_navigation",
+            "main_screen_pages",
+            "screen_back",
+        ):
+            context.user_data.pop(name, None)
+    elif not query and text in {
+        "GROUND STATUS",
+        "SKED",
+        "OPS BRIEF",
+        "FLEET DOCS",
+        "ANALYTICS",
+        "CHARTER CHECK",
+    }:
+        previous = context.user_data.get("main_screen_pages")
+        if previous:
+            # Only one previous screen, in memory. Not a chat history.
+            context.user_data["screen_back"] = previous
+
+    if query and (query.data or "").startswith("docs:"):
+        previous = context.user_data.get("main_screen_pages")
+        if previous:
+            context.user_data["screen_back"] = previous
+    elif query and (query.data or "").startswith(("fl:", "fc:", "wk:", "sk:", "sv:")):
+        # These screens have their own contextual return actions.
+        context.user_data.pop("screen_back", None)
+
+    context.user_data["screen_generation"] = (
+        context.user_data.get("screen_generation", 0) + 1
+    )
+    screen = MainScreen(update, context)
+    if restarting:
+        await screen.install_keyboard()
+    return await handler(ScreenUpdate(update, screen), context)

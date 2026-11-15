@@ -7,8 +7,8 @@ import pytest
 
 from agent.core import agent
 from bot import bot
-from bot.commands import COMMANDS, MENU_GROUPS, menu_keyboard, telegram_commands
-from bot.keyboards import HOME_SECTIONS
+from bot.commands import COMMANDS
+from bot.keyboards import HOME_PLACEHOLDERS
 from tests.test_bot_commands import update_for
 
 
@@ -60,22 +60,25 @@ async def test_disabled_buttons_cannot_reach_tools(context, monkeypatch, data):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("label,section", HOME_SECTIONS.items())
-async def test_home_sections_show_operation_buttons(context, label, section):
+@pytest.mark.parametrize("label", sorted(HOME_PLACEHOLDERS))
+async def test_home_placeholders_do_not_call_operations(context, label):
     update = update_for(label)
     await bot.handle_message(update, context)
-    assert update.effective_message.reply_text.call_args.kwargs[
-        "reply_markup"
-    ] == menu_keyboard(section)
+    assert "пока не подключена" in update.effective_message.reply_text.call_args.args[0]
     agent.chat.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_startup_only_configures_telegram(context, monkeypatch):
     monkeypatch.setattr(bot, "BOT_USERNAME", "OPS_bot")
-    telegram = SimpleNamespace(username="OPS_bot", set_my_commands=AsyncMock())
+    telegram = SimpleNamespace(username="OPS_bot", delete_my_commands=AsyncMock())
     await bot.setup_telegram(SimpleNamespace(bot=telegram))
-    telegram.set_my_commands.assert_awaited_once()
+    assert telegram.delete_my_commands.await_count == 2
+    assert telegram.delete_my_commands.call_args_list[0].kwargs == {}
+    assert (
+        telegram.delete_my_commands.call_args_list[1].kwargs["scope"].type
+        == "all_private_chats"
+    )
     agent.warmup.assert_not_awaited()
     agent.client.chat.assert_not_awaited()
 
@@ -94,28 +97,19 @@ def test_runtime_import_does_not_load_agent_or_ollama():
     assert result.returncode == 0, result.stderr
 
 
-def test_menus_and_commands_have_no_ai_or_flight_watch():
+def test_commands_have_no_ai_or_flight_watch():
     assert not {"ai", "watch"} & COMMANDS.keys()
-    assert not {"ai", "watch"} & {command.command for command in telegram_commands()}
-    for group in [None, *MENU_GROUPS]:
-        markup = menu_keyboard(group)
-        assert not any(
-            b.callback_data in {"op:ai", "op:watch"}
-            for row in markup.inline_keyboard
-            for b in row
-        )
 
 
 @pytest.mark.asyncio
-async def test_menu_button_opens_sections_without_loading_schedule(
+async def test_retired_menu_button_is_ignored_without_loading_schedule(
     context, monkeypatch
 ):
     schedule = AsyncMock()
     monkeypatch.setattr(bot, "weekly_flow", schedule)
     update = update_for("MENU")
     await bot.handle_message(update, context)
-    markup = update.effective_message.reply_text.call_args.kwargs["reply_markup"]
-    assert markup == menu_keyboard()
+    update.effective_message.reply_text.assert_not_awaited()
     schedule.assert_not_awaited()
 
 

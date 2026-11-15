@@ -42,7 +42,7 @@ async def test_other_user_proceeds_while_first_waits(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_same_user_messages_remain_ordered(monkeypatch):
+async def test_same_user_requests_can_run_without_blocking_navigation(monkeypatch):
     monkeypatch.setattr(settings, "telegram_allowed_user_ids", "1,2")
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -61,11 +61,11 @@ async def test_same_user_messages_remain_ordered(monkeypatch):
         await asyncio.wait_for(entered.wait(), 1)
         second = asyncio.create_task(bot.handle_message(update_for(1), None))
         await asyncio.sleep(0)
-        assert calls == ["start"]
+        assert calls == ["start", "start"]
     finally:
         release.set()
         await asyncio.gather(first, *([second] if second else []))
-    assert calls == ["start", "end", "start", "end"]
+    assert calls == ["start", "start", "end", "end"]
 
 
 @pytest.mark.asyncio

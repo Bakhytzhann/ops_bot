@@ -15,7 +15,6 @@ def fleet_docs_keyboard():
             [InlineKeyboardButton(title, callback_data=f"docs:{key}")]
             for key, title in DOCUMENT_CATEGORIES.items()
         ]
-        + [[InlineKeyboardButton("Меню", callback_data="op:menu")]]
     )
 
 

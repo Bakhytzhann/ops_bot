@@ -200,20 +200,19 @@ def test_reply_keyboard_has_six_quick_actions():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user", [42, 99])
-async def test_start_replaces_old_reply_keyboard(context, user):
+async def test_start_responds_for_allowed_and_pending_users(context, user):
     event = update(user=user)
     await bot.handle_message(event, context)
-    assert (
-        event.effective_message.reply_text.call_args.kwargs["reply_markup"]
-        == home_keyboard()
-    )
+    event.effective_message.reply_text.assert_awaited_once()
+    if user == 42:
+        assert "шесть кнопок" in event.effective_message.reply_text.call_args.args[0]
 
 
 @pytest.mark.asyncio
 async def test_schedule_button_runs_existing_sked(context, monkeypatch):
     show = AsyncMock()
     monkeypatch.setattr(bot, "show_week", show)
-    event = update(user=42, text="SCHEDULE")
+    event = update(user=42, text="SKED")
     await bot.handle_message(event, context)
     show.assert_awaited_once_with(event, context, edit=False)
 

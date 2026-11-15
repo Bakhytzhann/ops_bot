@@ -142,12 +142,11 @@ def test_card_buttons_exact_and_switch_directions(card):
     assert [[b.text for b in row] for row in markup.inline_keyboard] == [
         ["DUTY / REST", "WX / TAF"],
         ["RTE / ALTN", "NOTAM"],
-        ["Local Time/IATA", "Briefing"],
-        ["Bot Summary"],
-        ["REFRESH", "← SKED"],
+        ["LT · IATA", "Briefing"],
+        ["REFRESH", "← К списку"],
     ]
     buttons = ui.preference_buttons("token", {"time": "LT", "codes": "IATA"})
-    assert [b.text for b in buttons] == ["Zulu/ICAO"]
+    assert [b.text for b in buttons] == ["UTC · ICAO"]
 
 
 def test_sked_dates_inside_flight_buttons_only(card):

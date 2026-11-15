@@ -49,16 +49,18 @@ def context(monkeypatch):
 @pytest.mark.parametrize(
     "action", ["card", "refresh", "crew", "weather", "duty", "route", "eet"]
 )
-def test_summary_button_is_directly_before_refresh_in_card_states(action):
+def test_retired_summary_is_absent_and_contextual_back_remains(action):
     snapshot = FlightSnapshot(flight(7))
     for page in (0, 1):
         markup = browser.card_keyboard(snapshot, "token", 0, action, page=page, pages=2)
         rows = markup.inline_keyboard
-        assert [button.text for button in rows[-2]] == ["Bot Summary"]
-        assert rows[-2][0].callback_data == "fc:token:0:summary:0"
-        assert [button.text for button in rows[-1]] == ["REFRESH", "← SKED"]
+        assert [button.text for button in rows[-1]] == ["REFRESH", "← К списку"]
         assert not any(
-            button.text == "Bot Report" or ":report:" in button.callback_data
+            button.text in {"Bot Report", "Bot Summary"}
+            or any(
+                value in (button.callback_data or "")
+                for value in (":report:", ":summary:")
+            )
             for row in rows
             for button in row
         )
@@ -78,8 +80,8 @@ async def test_summary_and_legacy_report_only_answer_without_side_effects(
     for _ in range(2):
         await bot.handle_button(event, context)
     assert [call.args for call in event.callback_query.answer.call_args_list] == [
-        ("Bot Summary — функция пока не подключена.",),
-        ("Bot Summary — функция пока не подключена.",),
+        ("Эта кнопка больше недоступна.",),
+        ("Эта кнопка больше недоступна.",),
     ]
     event.callback_query.edit_message_text.assert_not_awaited()
     event.effective_message.reply_text.assert_not_awaited()

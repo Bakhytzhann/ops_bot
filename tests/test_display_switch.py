@@ -15,7 +15,7 @@ from tests.test_weekly_browser import update
 def test_single_switch_defaults_to_zulu_icao(card):
     buttons = browser.preference_buttons("token", {})
     assert len(buttons) == 1
-    assert buttons[0].text == "Local Time/IATA"
+    assert buttons[0].text == "LT · IATA"
     assert buttons[0].callback_data == "sv:token:view"
     label = browser.flight_label(card.flight)
     assert "UAAA 0030z 0200z UGTB" in label
@@ -26,7 +26,7 @@ def test_combined_switch_and_legacy_callbacks_toggle_both_settings(key):
     preferences = {}
     browser.toggle_preference(preferences, key)
     assert preferences == {"time": "LT", "codes": "IATA"}
-    assert browser.preference_buttons("token", preferences)[0].text == "Zulu/ICAO"
+    assert browser.preference_buttons("token", preferences)[0].text == "UTC · ICAO"
     browser.toggle_preference(preferences, key)
     assert preferences == {"time": "Z", "codes": "ICAO"}
 
@@ -35,7 +35,7 @@ def test_card_uses_freed_button_for_cached_briefing_link(card):
     url = "https://docs.example.test/briefing?signature=test"
     card.blocks["briefing"] = SourceBlock("ForeFlight", details={"url": url})
     row = browser.card_keyboard(card, "token", 0).inline_keyboard[2]
-    assert [button.text for button in row] == ["Local Time/IATA", "Briefing"]
+    assert [button.text for button in row] == ["LT · IATA", "Briefing"]
     assert row[0].callback_data == "fc:token:0:view:0"
     assert row[1].url == url and row[1].callback_data is None
 
@@ -70,7 +70,9 @@ async def test_switch_is_shared_between_sked_and_card_without_reload(card, monke
     back = update(data="wk:token:0")
     await browser.handle_selection(back, context)
     markup = back.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-    assert any(button.text == "LT" for row in markup.inline_keyboard for button in row)
+    assert any(
+        button.text == "LT · IATA" for row in markup.inline_keyboard for button in row
+    )
     loader.assert_not_awaited()
 
 

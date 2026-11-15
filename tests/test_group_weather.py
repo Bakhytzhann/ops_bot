@@ -41,10 +41,10 @@ def test_other_chats_and_missing_identity_denied(monkeypatch, chat, user):
 
 
 @pytest.mark.asyncio
-async def test_other_member_can_click_then_execute_with_group_context(monkeypatch):
+async def test_legacy_route_command_executes_without_global_identity(monkeypatch):
     monkeypatch.setattr(settings, "telegram_allowed_user_ids", "42")
     message = SimpleNamespace(
-        text=None,
+        text="/route",
         message_thread_id=None,
         reply_text=AsyncMock(return_value=SimpleNamespace(message_id=900)),
     )
@@ -57,7 +57,7 @@ async def test_other_member_can_click_then_execute_with_group_context(monkeypatc
     context = SimpleNamespace(
         user_data={}, bot=SimpleNamespace(send_chat_action=AsyncMock())
     )
-    await bot.handle_button(update, context)
+    await bot.handle_message(update, context)
     assert context.user_data["operation_inputs"][(42, None)]["action"] == "route"
 
     async def direct(*args):

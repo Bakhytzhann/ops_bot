@@ -2,8 +2,6 @@
 
 from dataclasses import dataclass
 
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
-
 from application.commands import execute_operation
 
 
@@ -76,74 +74,15 @@ COMMANDS.update(
     }
 )
 
-MENU_GROUPS = {
-    "preparation": (
-        "Предполётная подготовка",
-        (
-            "search",
-            "prepare",
-            "crew",
-            "roster",
-            "duty",
-            "ftl",
-            "violations",
-            "weather",
-            "notams",
-            "route",
-            "briefing",
-            "flighttime",
-            "overflight",
-        ),
-    ),
-    "reports": (
-        "Аналитика / Отчёты",
-        ("report", "flights"),
-    ),
-}
-
 
 def help_text():
-    return "\n".join(
-        [
-            "OPS Bot · предполётные операции",
-            "/sked — SKED → Flight Card; Next 7d / Next 30d — следующий период.",
-            "/menu — основные разделы. Выберите действие и ответьте на запрос параметров.",
-            *[f"/{name} — {command.title}" for name, command in COMMANDS.items()],
-            "/cancel — отменить ввод; /help — справка.",
-            "Даты и времена — UTC. Доступ только в личных чатах после одобрения.",
-            "Администраторы: /access — заявки и отзыв доступа.",
-        ]
+    return (
+        "OPS Bot · оперативная справочная система.\n"
+        "Нижняя клавиатура — шесть основных разделов.\n"
+        "SKED — ближайшие три дня (UTC), выбор рейса и Flight Card.\n"
+        "FLEET DOCS — разделы документов, файлы пока не загружены.\n"
+        "Данные носят вспомогательный характер; сверяйте с первоисточниками."
     )
-
-
-def menu_keyboard(group=None):
-    if group is None:
-        rows = [[InlineKeyboardButton("SKED", callback_data="op:week")]]
-        rows.append([InlineKeyboardButton("FLEET DOCS", callback_data="docs:home")])
-        rows += [
-            [InlineKeyboardButton(title, callback_data=f"op:group_{key}")]
-            for key, (title, _) in MENU_GROUPS.items()
-        ]
-    else:
-        buttons = [
-            InlineKeyboardButton(COMMANDS[name].title, callback_data=f"op:{name}")
-            for name in MENU_GROUPS[group][1]
-        ]
-        rows = [[InlineKeyboardButton("SKED", callback_data="op:week")]]
-        rows += [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
-        rows.append([InlineKeyboardButton("⌂ Меню", callback_data="op:menu")])
-    rows.append([InlineKeyboardButton("Справка", callback_data="op:help")])
-    return InlineKeyboardMarkup(rows)
-
-
-def telegram_commands():
-    return [
-        BotCommand("start", "Начать / запросить доступ"),
-        BotCommand("menu", "Основные разделы"),
-        BotCommand("sked", "SKED — выбрать рейс"),
-        BotCommand("help", "Справка"),
-        BotCommand("cancel", "Отменить ввод"),
-    ]
 
 
 async def execute_command(name, arguments):
