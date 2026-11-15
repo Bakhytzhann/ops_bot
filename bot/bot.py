@@ -40,7 +40,6 @@ from bot.flight_browser import (
 from bot.keyboards import (
     HOME_PLACEHOLDERS,
     SCHEDULE_BUTTON,
-    home_keyboard,
 )
 from bot.main_screen import dispatch_screen
 from bot.message_edits import edit_message_text
@@ -134,11 +133,7 @@ async def handle_button(update, context):
     if (query.data or "").startswith("docs:"):
         category = query.data.removeprefix("docs:")
         try:
-            response = (
-                "FLEET DOCS · выберите раздел"
-                if category == "home"
-                else fleet_docs_response(category)
-            )
+            response = fleet_docs_response(category)
         except ValueError:
             await query.answer("Раздел не найден.", show_alert=True)
             return
@@ -341,6 +336,7 @@ async def setup_telegram(application):
             "TELEGRAM_ADMIN_IDS is empty; admission decisions are unavailable"
         )
     try:
+        await application.bot.delete_my_commands()
         await application.bot.delete_my_commands(scope=BotCommandScopeAllPrivateChats())
     except TelegramError as exc:
         timing_logger.warning(
