@@ -8,9 +8,7 @@ from agent.core import agent
 from bot import bot
 from bot.commands import (
     COMMANDS,
-    MENU_GROUPS,
     help_text,
-    menu_keyboard,
 )
 from config.settings import settings
 
@@ -39,15 +37,10 @@ def context(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_help_and_menu_use_no_model(context):
-    update = update_for("/menu@OPS_bot")
+async def test_help_uses_no_model(context):
+    update = update_for("/help@OPS_bot")
     await bot.handle_message(update, context)
     assert "SKED" in update.effective_message.reply_text.call_args.args[0]
-    update.effective_message.reply_text.assert_awaited_once()
-    assert (
-        update.effective_message.reply_text.call_args.kwargs["reply_markup"]
-        == menu_keyboard()
-    )
     agent.chat.assert_not_awaited()
 
 
@@ -63,17 +56,12 @@ async def test_every_explicit_operation_bypasses_model(context, monkeypatch, act
 
 
 @pytest.mark.asyncio
-async def test_button_requests_input_then_reply_executes(context, monkeypatch):
+async def test_removed_callback_has_no_effect(context):
     update = update_for(None)
     update.callback_query = SimpleNamespace(data="op:route", answer=AsyncMock())
     await bot.handle_button(update, context)
-    assert context.user_data["operation_inputs"][(42, None)]["action"] == "route"
-    direct = AsyncMock(return_value="Route answer")
-    monkeypatch.setattr(bot, "execute_command", direct)
-    reply = update_for("ABC1265 на 2026-11-11", reply=SimpleNamespace(message_id=900))
-    await bot.handle_message(reply, context)
-    direct.assert_awaited_once_with("route", "ABC1265 на 2026-11-11")
-    assert not context.user_data["operation_inputs"]
+    assert update.callback_query.answer.call_args.kwargs["show_alert"] is True
+    assert not context.user_data.get("operation_inputs")
     agent.chat.assert_not_awaited()
 
 
@@ -166,22 +154,8 @@ async def test_explicit_command_allows_other_group_member(context, monkeypatch):
     agent.chat.assert_not_awaited()
 
 
-def test_help_catalog_matches_buttons_and_commands():
-    for name in COMMANDS:
-        assert f"/{name}" in help_text()
-    callbacks = {
-        b.callback_data
-        for group in MENU_GROUPS
-        for row in menu_keyboard(group).inline_keyboard
-        for b in row
-    }
-    visible = {name for _, commands in MENU_GROUPS.values() for name in commands}
-    assert callbacks == {f"op:{name}" for name in visible} | {
-        "op:help",
-        "op:week",
-        "op:menu",
-    }
-    assert "op:compare" not in callbacks
+def test_help_mentions_no_secondary_menu():
+    assert "Нижняя клавиатура" in help_text()
 
 
 def test_explanation_questions_stay_with_model():
@@ -205,7 +179,7 @@ def test_persistent_keyboard_has_six_actions():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "label", ["GROUND STATUS", "OPS BRIEF", "CHARTER CHECK", "Сводка", "СЛОТ"]
+    "label", ["GROUND STATUS", "OPS BRIEF", "CHARTER CHECK", "ANALYTICS"]
 )
 async def test_unimplemented_quick_actions_do_not_call_model_or_api(
     context, monkeypatch, label
@@ -220,8 +194,8 @@ async def test_unimplemented_quick_actions_do_not_call_model_or_api(
 
 
 @pytest.mark.asyncio
-async def test_quick_search_prompts_for_flight(context):
+async def test_old_search_button_is_not_accepted(context):
     update = update_for("Поиск")
     await bot.handle_message(update, context)
-    assert context.user_data["operation_inputs"][(42, None)]["action"] == "search"
+    assert not context.user_data.get("operation_inputs")
     agent.chat.assert_not_awaited()
