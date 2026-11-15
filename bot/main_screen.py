@@ -92,7 +92,13 @@ class MainScreen:
         if self.generation != self.context.user_data.get("screen_generation"):
             return None
         pages = state["pages"]
-        rows = list(state["markup"].inline_keyboard)
+        rows = [
+            [b for b in row if b.callback_data != "screen:back"]
+            for row in state["markup"].inline_keyboard
+        ]
+        rows = [row for row in rows if row]
+        if self.context.user_data.get("screen_back"):
+            rows.append([InlineKeyboardButton("← Назад", callback_data="screen:back")])
         if len(pages) > 1:
             navigation = []
             if index:
@@ -294,6 +300,14 @@ async def dispatch_screen(update, context, handler):
         if previous:
             # Only one previous screen, in memory. Not a chat history.
             context.user_data["screen_back"] = previous
+
+    if query and (query.data or "").startswith("docs:"):
+        previous = context.user_data.get("main_screen_pages")
+        if previous:
+            context.user_data["screen_back"] = previous
+    elif query and (query.data or "").startswith(("fl:", "fc:", "wk:", "sk:", "sv:")):
+        # These screens have their own contextual return actions.
+        context.user_data.pop("screen_back", None)
 
     context.user_data["screen_generation"] = (
         context.user_data.get("screen_generation", 0) + 1
