@@ -5,7 +5,6 @@ import logging
 import re
 from html import escape
 from time import perf_counter
-from weakref import WeakValueDictionary
 
 from loguru import logger as timing_logger
 from telegram import BotCommandScopeAllPrivateChats, ForceReply, Update
@@ -43,13 +42,12 @@ from bot.keyboards import (
     SCHEDULE_BUTTON,
     home_keyboard,
 )
-from bot.main_screen import dispatch_screen, loading
+from bot.main_screen import dispatch_screen
 from bot.message_edits import edit_message_text
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
 
 logger = logging.getLogger(__name__)
-_conversation_locks = WeakValueDictionary()
 BOT_USERNAME = settings.telegram_bot_username
 
 
@@ -226,23 +224,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     if not message or not message.text:
         return
-    key = (update.effective_chat.id, update.effective_user.id)
-    lock = _conversation_locks.setdefault(key, asyncio.Lock())
-    async with lock:
-        command = parsed_command(message.text)
-        if not is_allowed(update):
-            if command and command[0] == "start":
-                await request_access(update, context)
-            return
-        if not accepts_message(update, context):
-            return
-        started = perf_counter()
-        try:
-            await _handle_message(update, context)
-        finally:
-            timing_logger.info(
-                "Telegram request duration_s={:.2f}", perf_counter() - started
-            )
+    command = parsed_command(message.text)
+    if not is_allowed(update):
+        if command and command[0] == "start":
+            await request_access(update, context)
+        return
+    if not accepts_message(update, context):
+        return
+    started = perf_counter()
+    try:
+        await _handle_message(update, context)
+    finally:
+        timing_logger.info(
+            "Telegram request duration_s={:.2f}", perf_counter() - started
+        )
 
 
 async def _handle_message(update, context):
@@ -269,9 +264,7 @@ async def _handle_message(update, context):
                 "FLEET DOCS · выберите раздел", reply_markup=fleet_docs_keyboard()
             )
         elif text in HOME_PLACEHOLDERS:
-            await message.reply_text(
-                f"{text}: функция пока не подключена."
-            )
+            await message.reply_text(f"{text}: функция пока не подключена.")
         elif command and command[0] == "cancel":
             await message.reply_text("Ввод отменён.")
         elif command and command[0] == "help":
@@ -307,7 +300,6 @@ async def _handle_message(update, context):
             await message.reply_text("Операция больше недоступна.")
             return
     try:
-        await loading(update)
         await context.bot.send_chat_action(
             chat_id=update.effective_chat.id, action=ChatAction.TYPING
         )
