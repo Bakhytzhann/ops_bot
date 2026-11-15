@@ -246,7 +246,7 @@ def is_card_notice_callback(data):
     return (
         len(parts) == 5
         and parts[0] == "fc"
-        and parts[3] in {"summary", "report", "briefing"}
+        and parts[3] == "briefing"
     )
 
 
@@ -285,12 +285,9 @@ async def handle_selection(update, context):
             or (navigation and navigation.get("return_to") != (token, index))
         ):
             raise ValueError("Карточка устарела. Откройте рейс из SKED.")
-        if parts[3] == "briefing":
-            await query.answer(
-                "Брифинг ForeFlight недоступен. Нажмите REFRESH.", show_alert=True
-            )
-        else:
-            await query.answer("Bot Summary — функция пока не подключена.")
+        await query.answer(
+            "Брифинг ForeFlight недоступен. Нажмите REFRESH.", show_alert=True
+        )
         return
     preferences = listing.setdefault("preferences", {})
     if kind in {"sv", "sk"}:
@@ -389,7 +386,7 @@ async def handle_selection(update, context):
                 snapshot = await load_flight_snapshot(
                     listing["flights"][position],
                     refresh=action == "refresh",
-                    on_update=progress,
+                    on_update=None if getattr(update, "main_screen", None) else progress,
                 )
                 if position in snapshots:
                     listing.setdefault("previous", {})[position] = snapshots[position]
