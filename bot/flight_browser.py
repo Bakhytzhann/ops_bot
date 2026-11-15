@@ -10,7 +10,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from application.operations import flight_schedule as get_flight_schedule
 from application.operations import prepare_flight as load_flight_snapshot
 from bot.admission import require_user
-from bot.main_screen import loading
 from bot.message_edits import edit_message_text
 from bot.notam_browser import render_notams, valid_action
 from services.flight_display import airport, flight_date, flight_reference, flight_time
@@ -64,7 +63,7 @@ def preference_buttons(token, preferences, *, position=None):
     local = preferences.get("time") == "LT" and preferences.get("codes") == "IATA"
     return [
         InlineKeyboardButton(
-            "Zulu/ICAO" if local else "Local Time/IATA", callback_data=callback
+            "UTC · ICAO" if local else "LT · IATA", callback_data=callback
         )
     ]
 
@@ -127,7 +126,7 @@ def render_page(token, listing, page=0):
     rows.append(
         [
             InlineKeyboardButton(
-                "UTC" if preferences.get("time") == "LT" else "LT",
+                "UTC · ICAO" if preferences.get("time") == "LT" else "LT · IATA",
                 callback_data=f"sv:{token}:view",
             )
         ]
@@ -141,7 +140,6 @@ def render_page(token, listing, page=0):
     rows.append(
         [
             InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh"),
-            InlineKeyboardButton("SKED", callback_data="op:week"),
         ]
     )
     state = (
@@ -157,8 +155,7 @@ def render_page(token, listing, page=0):
     )
     if not listing["complete"]:
         text += "\nРасписание неполное: нет данных по части рейсов."
-    if preferences.get("time") == "LT":
-        text += "\nLT"
+    text += "\nРежим: " + ("LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO")
     return text, InlineKeyboardMarkup(rows)
 
 
@@ -183,7 +180,6 @@ async def show_week(
             raise ValueError("Не распознана дата поиска.")
         if period:
             today, end = period.start, period.end
-    await loading(update)
     try:
         result = await get_flight_schedule(today.isoformat(), end.isoformat())
     except PermissionError:
@@ -369,7 +365,6 @@ async def handle_selection(update, context):
             snapshots = listing.setdefault("snapshots", {})
             snapshot = snapshots.get(position)
             if kind == "fl" or snapshot is None or action == "refresh":
-                await edit_message_text(query, "LOADING…")
                 progress_lock = asyncio.Lock()
                 last_progress = [""]
 
@@ -423,8 +418,7 @@ async def handle_selection(update, context):
                 )
 
                 try:
-                    await loading(update)
-                    result = await asyncio.wait_for(
+                                    result = await asyncio.wait_for(
                         selected_flight_weather(
                             snapshot.flight,
                             snapshot.flight["departureUTC"][:10],
@@ -537,7 +531,6 @@ def card_keyboard(
         )
     if action not in {"card", "refresh"}:
         rows.append([button("← К рейсу", "card")])
-    rows.append([button("Bot Summary", "summary")])
     rows.append(
         [
             button("REFRESH", "refresh"),
