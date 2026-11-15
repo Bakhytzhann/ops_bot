@@ -70,11 +70,7 @@ async def test_switch_is_shared_between_sked_and_card_without_reload(card, monke
     back = update(data="wk:token:0")
     await browser.handle_selection(back, context)
     markup = back.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-    assert any(
-        button.text == "Local Time/IATA"
-        for row in markup.inline_keyboard
-        for button in row
-    )
+    assert any(button.text == "LT" for row in markup.inline_keyboard for button in row)
     loader.assert_not_awaited()
 
 

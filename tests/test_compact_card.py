@@ -329,7 +329,7 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
         back = update(data="wk:token:0")
         await bot.handle_button(back, ctx)
         back.effective_message.reply_text.assert_not_awaited()
-        assert "SKED:" in back.callback_query.edit_message_text.call_args.args[0]
+        assert "(UTC)" in back.callback_query.edit_message_text.call_args.args[0]
         monkeypatch.setattr(
             ui,
             "get_flight_schedule",

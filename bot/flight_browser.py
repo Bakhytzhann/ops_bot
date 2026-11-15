@@ -10,6 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from application.operations import flight_schedule as get_flight_schedule
 from application.operations import prepare_flight as load_flight_snapshot
 from bot.admission import require_user
+from bot.main_screen import loading
 from bot.message_edits import edit_message_text
 from bot.notam_browser import render_notams, valid_action
 from services.flight_display import airport, flight_date, flight_reference, flight_time
@@ -68,6 +69,33 @@ def preference_buttons(token, preferences, *, position=None):
     ]
 
 
+def schedule_heading(start, end):
+    first = datetime.fromisoformat(start).date()
+    last = datetime.fromisoformat(end).date()
+    months = (
+        "JAN",
+        "FEB",
+        "MAR",
+        "APR",
+        "MAY",
+        "JUN",
+        "JUL",
+        "AUG",
+        "SEP",
+        "OCT",
+        "NOV",
+        "DEC",
+    )
+    prefix = f"{first.year % 100:02}{months[first.month - 1]}"
+    if first == last:
+        period = f"{prefix} {first.day:02}"
+    elif (first.year, first.month) == (last.year, last.month):
+        period = f"{prefix} {first.day:02}–{last.day:02}"
+    else:
+        period = f"{prefix} {first.day:02}–{last.year % 100:02}{months[last.month - 1]} {last.day:02}"
+    return f"{period} (UTC)"
+
+
 def render_page(token, listing, page=0):
     flights = listing["flights"]
     preferences = listing.get("preferences", {})
@@ -96,16 +124,23 @@ def render_page(token, listing, page=0):
         )
     if navigation:
         rows.append(navigation)
-    rows.append(preference_buttons(token, preferences))
     rows.append(
         [
-            InlineKeyboardButton("Next 7d", callback_data=f"sk:{token}:7"),
-            InlineKeyboardButton("Next 30d", callback_data=f"sk:{token}:30"),
+            InlineKeyboardButton(
+                "UTC" if preferences.get("time") == "LT" else "LT",
+                callback_data=f"sv:{token}:view",
+            )
         ]
     )
     rows.append(
         [
-            InlineKeyboardButton("↻", callback_data=f"sk:{token}:refresh"),
+            InlineKeyboardButton("7 дней", callback_data=f"sk:{token}:7"),
+            InlineKeyboardButton("30 дней", callback_data=f"sk:{token}:30"),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh"),
             InlineKeyboardButton("SKED", callback_data="op:week"),
         ]
     )
@@ -117,7 +152,7 @@ def render_page(token, listing, page=0):
         else "нет данных"
     )
     text = (
-        f"{'Поиск' if listing.get('search') else 'SKED'}: {listing['start']} — {listing['end']} (период UTC)\n"
+        f"{'Поиск: ' if listing.get('search') else ''}{schedule_heading(listing['start'], listing['end'])}\n"
         f"{state} · Страница {page + 1}/{pages}"
     )
     if not listing["complete"]:
@@ -148,6 +183,7 @@ async def show_week(
             raise ValueError("Не распознана дата поиска.")
         if period:
             today, end = period.start, period.end
+    await loading(update)
     try:
         result = await get_flight_schedule(today.isoformat(), end.isoformat())
     except PermissionError:
@@ -333,9 +369,7 @@ async def handle_selection(update, context):
             snapshots = listing.setdefault("snapshots", {})
             snapshot = snapshots.get(position)
             if kind == "fl" or snapshot is None or action == "refresh":
-                await edit_message_text(
-                    query, "Загрузка карточки · Leon / ForeFlight / WX…"
-                )
+                await edit_message_text(query, "LOADING…")
                 progress_lock = asyncio.Lock()
                 last_progress = [""]
 
@@ -389,6 +423,7 @@ async def handle_selection(update, context):
                 )
 
                 try:
+                    await loading(update)
                     result = await asyncio.wait_for(
                         selected_flight_weather(
                             snapshot.flight,

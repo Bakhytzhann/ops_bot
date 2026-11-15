@@ -78,12 +78,27 @@ COMMANDS.update(
 
 MENU_GROUPS = {
     "preparation": (
-        "Flight Preparation",
-        ("search", "prepare", "crew", "route", "briefing", "flighttime", "overflight"),
+        "Предполётная подготовка",
+        (
+            "search",
+            "prepare",
+            "crew",
+            "roster",
+            "duty",
+            "ftl",
+            "violations",
+            "weather",
+            "notams",
+            "route",
+            "briefing",
+            "flighttime",
+            "overflight",
+        ),
     ),
-    "crew": ("Crew & FTL", ("crew", "roster", "duty", "ftl", "violations")),
-    "weather": ("Weather & NOTAM", ("weather", "notams")),
-    "reports": ("Operational Reports", ("flights", "compare", "report")),
+    "reports": (
+        "Аналитика / Отчёты",
+        ("report", "flights"),
+    ),
 }
 
 
@@ -104,6 +119,7 @@ def help_text():
 def menu_keyboard(group=None):
     if group is None:
         rows = [[InlineKeyboardButton("SKED", callback_data="op:week")]]
+        rows.append([InlineKeyboardButton("FLEET DOCS", callback_data="docs:home")])
         rows += [
             [InlineKeyboardButton(title, callback_data=f"op:group_{key}")]
             for key, (title, _) in MENU_GROUPS.items()

@@ -34,13 +34,21 @@ from bot.commands import (
     menu_keyboard,
     telegram_commands,
 )
+from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
 from bot.flight_browser import (
     handle_selection,
     invalidate_screen,
     is_card_notice_callback,
     show_week,
 )
-from bot.keyboards import HOME_SECTIONS, SCHEDULE_BUTTON, home_keyboard
+from bot.keyboards import (
+    HOME_PLACEHOLDERS,
+    HOME_SECTIONS,
+    MENU_BUTTON,
+    SCHEDULE_BUTTON,
+    home_keyboard,
+)
+from bot.main_screen import dispatch_screen, loading
 from bot.message_edits import edit_message_text
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
@@ -75,7 +83,10 @@ def pending_reply(update, context):
         .get(pending_key(update))
     )
     reply = getattr(update.effective_message, "reply_to_message", None)
-    if pending and reply and reply.message_id == pending["message_id"]:
+    if pending and (
+        (reply and reply.message_id == pending["message_id"])
+        or getattr(update, "main_screen", None) is not None
+    ):
         return pending
     return None
 
@@ -87,8 +98,11 @@ def accepts_message(update, context):
         and message.text
         and (
             parsed_command(message.text)
-            or message.text.strip() == SCHEDULE_BUTTON
+            or message.text.strip()
+            in {MENU_BUTTON, SCHEDULE_BUTTON, "SCHEDULE", "Расписание", "Поиск"}
             or message.text.strip() in HOME_SECTIONS
+            or message.text.strip() in HOME_PLACEHOLDERS
+            or message.text.strip() == "FLEET DOCS"
             or pending_reply(update, context)
         )
     )
@@ -99,8 +113,13 @@ async def prompt_for_input(update, context, action):
         return
     user = update.effective_user
     name = escape(getattr(user, "first_name", None) or "Пользователь")
+    instruction = (
+        "Введите ответ в поле сообщения. Кнопка «Отмена» — отмена."
+        if getattr(update, "main_screen", None) is not None
+        else "Ответьте на это сообщение. /cancel — отмена."
+    )
     prompt = await update.effective_message.reply_text(
-        f'<a href="tg://user?id={user.id}">{name}</a>, {escape(COMMANDS[action].prompt)}\nОтветьте на это сообщение. /cancel — отмена.',
+        f'<a href="tg://user?id={user.id}">{name}</a>, {escape(COMMANDS[action].prompt)}\n{instruction}',
         parse_mode="HTML",
         reply_markup=ForceReply(selective=True),
     )
@@ -121,6 +140,26 @@ async def handle_button(update, context):
             show_alert=True,
         )
         return
+    if (query.data or "").startswith("docs:"):
+        category = query.data.removeprefix("docs:")
+        try:
+            response = (
+                "FLEET DOCS · выберите раздел"
+                if category == "home"
+                else fleet_docs_response(category)
+            )
+        except ValueError:
+            await query.answer("Раздел не найден.", show_alert=True)
+            return
+        invalidate_screen(update, context)
+        context.user_data.setdefault("operation_inputs", {}).pop(
+            pending_key(update), None
+        )
+        await query.answer()
+        await update.effective_message.reply_text(
+            response, reply_markup=fleet_docs_keyboard()
+        )
+        return
     if (query.data or "").startswith(("wk:", "fl:", "fc:", "sk:", "sv:")):
         if not is_card_notice_callback(query.data):
             await query.answer()
@@ -129,13 +168,19 @@ async def handle_button(update, context):
     action = (query.data or "").removeprefix("op:")
     if (
         action not in COMMANDS
-        and action not in {"menu", "week", "help"}
+        and action not in {"menu", "week", "help", "cancel"}
         and not action.startswith("group_")
     ):
         await query.answer("Откройте новое меню: /menu", show_alert=True)
         return
     invalidate_screen(update, context)
     context.user_data.setdefault("operation_inputs", {}).pop(pending_key(update), None)
+    if action == "cancel":
+        await query.answer()
+        await edit_message_text(
+            query, "Ввод отменён. Выберите раздел.", reply_markup=menu_keyboard()
+        )
+        return
     if action == "menu" or action.startswith("group_"):
         group = action.removeprefix("group_") if action != "menu" else None
         if group is not None and group not in MENU_GROUPS:
@@ -202,6 +247,10 @@ async def weekly_flow(update, context, *, selection=False):
 
 async def send_answer(message, answer):
     answer = answer.strip() or "Источник не предоставил результат."
+    screen = getattr(message, "main_screen", None)
+    if screen is not None:
+        await screen.render(answer, disable_web_page_preview=True)
+        return
     for index in range(0, len(answer), 3900):
         await message.reply_text(
             answer[index : index + 3900],
@@ -243,14 +292,20 @@ async def _handle_message(update, context):
         return
     command = parsed_command(message.text)
     text = message.text.strip()
-    if text == SCHEDULE_BUTTON or (command and command[0] in {"week", "sked"}):
+    if text in {SCHEDULE_BUTTON, "SCHEDULE", "Расписание"} or (
+        command and command[0] in {"week", "sked"}
+    ):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
         )
         await weekly_flow(update, context)
         return
-    if text in HOME_SECTIONS or (
-        command and command[0] in {"start", "menu", "help", "cancel", "access"}
+    if (
+        text in HOME_SECTIONS
+        or text in {MENU_BUTTON, "Поиск"}
+        or text in HOME_PLACEHOLDERS
+        or text == "FLEET DOCS"
+        or (command and command[0] in {"start", "menu", "help", "cancel", "access"})
     ):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
@@ -258,13 +313,23 @@ async def _handle_message(update, context):
         invalidate_screen(update, context)
         if command and command[0] == "access":
             await show_access(update, context)
+        elif text == "Поиск":
+            await prompt_for_input(update, context, "search")
+        elif text in HOME_PLACEHOLDERS:
+            await message.reply_text(
+                f"{text}: функция пока не подключена.", reply_markup=home_keyboard()
+            )
+        elif text == "FLEET DOCS":
+            await message.reply_text(
+                "FLEET DOCS · выберите раздел", reply_markup=fleet_docs_keyboard()
+            )
         elif text in HOME_SECTIONS:
             await message.reply_text(
                 text, reply_markup=menu_keyboard(HOME_SECTIONS[text])
             )
-        elif command[0] == "help":
+        elif command and command[0] == "help":
             await message.reply_text(help_text(), reply_markup=menu_keyboard())
-        elif command[0] == "menu":
+        elif text == MENU_BUTTON or command[0] == "menu":
             await message.reply_text(
                 "OPS Bot · SKED и предполётная подготовка.",
                 reply_markup=menu_keyboard(),
@@ -275,7 +340,7 @@ async def _handle_message(update, context):
             )
         else:
             await message.reply_text(
-                "OPS Bot · SKED → рейс → Flight Card. Выберите раздел.",
+                "OPS Bot · выберите действие на клавиатуре.",
                 reply_markup=home_keyboard(),
             )
         return
@@ -305,6 +370,7 @@ async def _handle_message(update, context):
             await message.reply_text("Операция больше недоступна. Откройте /menu.")
             return
     try:
+        await loading(update)
         await context.bot.send_chat_action(
             chat_id=update.effective_chat.id, action=ChatAction.TYPING
         )
@@ -355,6 +421,17 @@ async def setup_telegram(application):
         )
 
 
+async def screen_message_handler(update, context):
+    pending = context.user_data.get("operation_inputs", {}).get(pending_key(update))
+    if not is_allowed(update) or (not accepts_message(update, context) and not pending):
+        return await handle_message(update, context)
+    return await dispatch_screen(update, context, handle_message)
+
+
+async def screen_button_handler(update, context):
+    return await dispatch_screen(update, context, handle_button)
+
+
 def create_application():
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not configured")
@@ -368,9 +445,9 @@ def create_application():
     application.add_handler(
         CallbackQueryHandler(handle_access_button, pattern=r"^access:")
     )
-    application.add_handler(CallbackQueryHandler(handle_button))
+    application.add_handler(CallbackQueryHandler(screen_button_handler))
     application.add_handler(
-        MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, handle_message)
+        MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, screen_message_handler)
     )
     return application
 

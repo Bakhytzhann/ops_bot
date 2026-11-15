@@ -187,11 +187,12 @@ async def test_repeated_inline_menu_handles_unmodified_response(context):
     assert event.callback_query.answer.await_count == 2
 
 
-def test_reply_keyboard_has_exactly_one_schedule_button():
+def test_reply_keyboard_has_six_quick_actions():
     keyboard = home_keyboard()
-    assert SCHEDULE_BUTTON == "SCHEDULE"
+    assert SCHEDULE_BUTTON == "SKED"
     assert [[button.text for button in row] for row in keyboard.keyboard] == [
-        ["SCHEDULE"]
+        ["GROUND STATUS", "SKED", "OPS BRIEF"],
+        ["FLEET DOCS", "ANALYTICS", "CHARTER CHECK"],
     ]
     assert keyboard.is_persistent
     assert not keyboard.one_time_keyboard

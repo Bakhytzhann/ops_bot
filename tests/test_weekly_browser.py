@@ -253,7 +253,7 @@ def test_home_keyboard_persists():
     keyboard = home_keyboard()
     assert keyboard.is_persistent is True
     assert keyboard.one_time_keyboard is False
-    assert keyboard.keyboard[0][0].text == SCHEDULE_BUTTON
+    assert keyboard.keyboard[0][1].text == SCHEDULE_BUTTON
 
 
 @pytest.mark.asyncio

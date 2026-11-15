@@ -104,3 +104,59 @@ def test_menus_and_commands_have_no_ai_or_flight_watch():
             for row in markup.inline_keyboard
             for b in row
         )
+
+
+@pytest.mark.asyncio
+async def test_menu_button_opens_sections_without_loading_schedule(
+    context, monkeypatch
+):
+    schedule = AsyncMock()
+    monkeypatch.setattr(bot, "weekly_flow", schedule)
+    update = update_for("MENU")
+    await bot.handle_message(update, context)
+    markup = update.effective_message.reply_text.call_args.kwargs["reply_markup"]
+    assert markup == menu_keyboard()
+    schedule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fleet_docs_opens_categories(context):
+    from bot.fleet_docs import fleet_docs_keyboard
+
+    update = update_for("FLEET DOCS")
+    await bot.handle_message(update, context)
+    assert (
+        update.effective_message.reply_text.call_args.kwargs["reply_markup"]
+        == fleet_docs_keyboard()
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", ["aircraft", "operator", "checklists"])
+async def test_fleet_docs_categories_show_empty_state(context, category):
+    update = update_for(None)
+    update.callback_query = SimpleNamespace(data=f"docs:{category}", answer=AsyncMock())
+    await bot.handle_button(update, context)
+    assert (
+        "утверждённые документы пока не загружены"
+        in update.effective_message.reply_text.call_args.args[0]
+    )
+
+
+@pytest.mark.asyncio
+async def test_fleet_docs_rejects_unknown_category(context):
+    update = update_for(None)
+    update.callback_query = SimpleNamespace(data="docs:unknown", answer=AsyncMock())
+    await bot.handle_button(update, context)
+    assert update.callback_query.answer.call_args.kwargs["show_alert"] is True
+    update.effective_message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fleet_docs_requires_access(context, monkeypatch):
+    monkeypatch.setattr(bot, "is_allowed", lambda update: False)
+    update = update_for(None)
+    update.callback_query = SimpleNamespace(data="docs:aircraft", answer=AsyncMock())
+    await bot.handle_button(update, context)
+    assert update.callback_query.answer.call_args.kwargs["show_alert"] is True
+    update.effective_message.reply_text.assert_not_awaited()
