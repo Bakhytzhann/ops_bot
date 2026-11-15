@@ -94,6 +94,17 @@ async def test_fleet_docs_click_edits_same_message(screen_context):
 
 
 @pytest.mark.asyncio
+async def test_docs_back_returns_to_docs_root(screen_context):
+    ctx = screen_context
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
+    screen_id = ctx.user_data["main_screen_message_id"]
+    await bot.screen_button_handler(callback("docs:checklists", screen_id), ctx)
+    assert "PRINTABLE CHECKLISTS" in ctx.bot.edit_message_text.call_args.kwargs["text"]
+    await bot.screen_button_handler(callback("screen:back", screen_id), ctx)
+    assert ctx.bot.edit_message_text.call_args.kwargs["text"] == "FLEET DOCS · выберите раздел"
+
+
+@pytest.mark.asyncio
 async def test_schedule_keeps_previous_context_until_data_arrives(screen_context, monkeypatch):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
