@@ -5,7 +5,6 @@ of message ownership. Access notifications remain separate from navigation.
 """
 
 import asyncio
-import logging
 from secrets import token_hex
 
 from telegram import (
@@ -14,13 +13,12 @@ from telegram import (
     InlineKeyboardMarkup,
     MessageEntity,
 )
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest
 
 from bot.keyboards import home_keyboard
 
 _write_locks = {}
 
-logger = logging.getLogger(__name__)
 PAGE_SIZE = 3900
 
 
@@ -227,13 +225,6 @@ class ScreenUpdate:
     def callback_query(self):
         query = getattr(self.original, "callback_query", None)
         return ScreenCallback(query, self.main_screen) if query else None
-
-
-async def loading(update):
-    screen = getattr(update, "main_screen", None)
-    if screen is not None:
-        # Keep the last usable screen and its buttons until fresh data arrives.
-        return
 
 
 async def dispatch_screen(update, context, handler):
