@@ -89,6 +89,7 @@ def accepts_message(update, context):
             parsed_command(message.text)
             or message.text.strip() == SCHEDULE_BUTTON
             or message.text.strip() in HOME_SECTIONS
+            or message.text.strip() in {"Сводка", "Поиск", "СЛОТ"}
             or pending_reply(update, context)
         )
     )
@@ -249,7 +250,7 @@ async def _handle_message(update, context):
         )
         await weekly_flow(update, context)
         return
-    if text in HOME_SECTIONS or (
+    if text in HOME_SECTIONS or text in {"Сводка", "Поиск", "СЛОТ"} or (
         command and command[0] in {"start", "menu", "help", "cancel", "access"}
     ):
         context.user_data.setdefault("operation_inputs", {}).pop(
@@ -258,6 +259,12 @@ async def _handle_message(update, context):
         invalidate_screen(update, context)
         if command and command[0] == "access":
             await show_access(update, context)
+        elif text == "Поиск":
+            await prompt_for_input(update, context, "search")
+        elif text in {"Сводка", "СЛОТ"}:
+            await message.reply_text(
+                f"{text}: функция пока не подключена.", reply_markup=home_keyboard()
+            )
         elif text in HOME_SECTIONS:
             await message.reply_text(
                 text, reply_markup=menu_keyboard(HOME_SECTIONS[text])
@@ -275,7 +282,7 @@ async def _handle_message(update, context):
             )
         else:
             await message.reply_text(
-                "OPS Bot · SKED → рейс → Flight Card. Выберите раздел.",
+                "OPS Bot · выберите действие на клавиатуре.",
                 reply_markup=home_keyboard(),
             )
         return
