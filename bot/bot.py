@@ -34,13 +34,14 @@ from bot.commands import (
     menu_keyboard,
     telegram_commands,
 )
+from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
 from bot.flight_browser import (
     handle_selection,
     invalidate_screen,
     is_card_notice_callback,
     show_week,
 )
-from bot.keyboards import HOME_SECTIONS, SCHEDULE_BUTTON, home_keyboard
+from bot.keyboards import HOME_PLACEHOLDERS, HOME_SECTIONS, SCHEDULE_BUTTON, home_keyboard
 from bot.message_edits import edit_message_text
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
@@ -89,6 +90,7 @@ def accepts_message(update, context):
             parsed_command(message.text)
             or message.text.strip() == SCHEDULE_BUTTON
             or message.text.strip() in HOME_SECTIONS
+            or message.text.strip() in HOME_PLACEHOLDERS
             or pending_reply(update, context)
         )
     )
@@ -120,6 +122,16 @@ async def handle_button(update, context):
             "Доступ разрешён только в личном чате для авторизованных пользователей.",
             show_alert=True,
         )
+        return
+    if (query.data or "").startswith("docs:"):
+        category = query.data.removeprefix("docs:")
+        try:
+            response = fleet_docs_response(category)
+        except ValueError:
+            await query.answer("Раздел не найден.", show_alert=True)
+            return
+        await query.answer()
+        await query.message.reply_text(response, reply_markup=fleet_docs_keyboard())
         return
     if (query.data or "").startswith(("wk:", "fl:", "fc:", "sk:", "sv:")):
         if not is_card_notice_callback(query.data):
@@ -249,7 +261,7 @@ async def _handle_message(update, context):
         )
         await weekly_flow(update, context)
         return
-    if text in HOME_SECTIONS or (
+    if text in HOME_SECTIONS or text in HOME_PLACEHOLDERS or (
         command and command[0] in {"start", "menu", "help", "cancel", "access"}
     ):
         context.user_data.setdefault("operation_inputs", {}).pop(
@@ -258,6 +270,14 @@ async def _handle_message(update, context):
         invalidate_screen(update, context)
         if command and command[0] == "access":
             await show_access(update, context)
+        elif text in HOME_PLACEHOLDERS:
+            await message.reply_text(
+                f"{text}: функция пока не подключена.", reply_markup=home_keyboard()
+            )
+        elif text == "FLEET DOCS":
+            await message.reply_text(
+                "FLEET DOCS · выберите раздел", reply_markup=fleet_docs_keyboard()
+            )
         elif text in HOME_SECTIONS:
             await message.reply_text(
                 text, reply_markup=menu_keyboard(HOME_SECTIONS[text])
@@ -266,7 +286,7 @@ async def _handle_message(update, context):
             await message.reply_text(help_text(), reply_markup=menu_keyboard())
         elif command[0] == "menu":
             await message.reply_text(
-                "OPS Bot · SKED и предполётная подготовка.",
+                "OPS Bot · выберите раздел.",
                 reply_markup=menu_keyboard(),
             )
         elif command[0] == "cancel":
@@ -275,7 +295,7 @@ async def _handle_message(update, context):
             )
         else:
             await message.reply_text(
-                "OPS Bot · SKED → рейс → Flight Card. Выберите раздел.",
+                "OPS Bot · выберите действие на клавиатуре.",
                 reply_markup=home_keyboard(),
             )
         return
