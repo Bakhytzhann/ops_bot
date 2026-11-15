@@ -5,9 +5,14 @@ HOME_SECTIONS = {
     "PREFLIGHT": "preparation",
     "ANALYTICS": "reports",
 }
+HOME_PLACEHOLDERS = {
+    "GROUND STATUS",
+    "OPS BRIEF",
+    "CHARTER CHECK",
+}
 QUICK_ACTIONS = (
-    ("SKED", "OPS BRIEF", "ANALYTICS"),
-    ("FLT SEARCH", "PREFLIGHT", "SLOT"),
+    ("GROUND STATUS", "SKED", "OPS BRIEF"),
+    ("PREFLIGHT", "ANALYTICS", "CHARTER CHECK"),
 )
 
 
