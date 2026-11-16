@@ -1,9 +1,9 @@
 import argparse
 import asyncio
 import logging
-import os
 from logging.handlers import RotatingFileHandler
 
+from .codex_bridge import runtime_environment
 from .config import ROOT, Config
 from .deploy_manager import DeployManager
 from .git_manager import GitManager
@@ -53,7 +53,7 @@ def main():
             run(
                 [config.dev_agent_codex, "--version"],
                 ROOT,
-                env={**os.environ, "CODEX_HOME": str(codex_home)},
+                env={**runtime_environment(), "CODEX_HOME": str(codex_home)},
             )
         )
         if code:
@@ -64,7 +64,7 @@ def main():
                 run(
                     [config.dev_agent_codex, "login", "status"],
                     ROOT,
-                    env={**os.environ, "CODEX_HOME": str(codex_home)},
+                    env={**runtime_environment(), "CODEX_HOME": str(codex_home)},
                 )
             )
             print(

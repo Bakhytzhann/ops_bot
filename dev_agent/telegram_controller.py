@@ -3,6 +3,7 @@ import json
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -17,6 +18,7 @@ from .session_manager import SessionManager
 logger = logging.getLogger(__name__)
 COMMANDS = (
     "start",
+    "menu",
     "help",
     "status",
     "task",
@@ -97,8 +99,10 @@ class Controller:
                 reply_markup=markup if index == len(chunks[:12]) - 1 else None,
             )
 
-    async def confirm(self, owner, payload, description):
+    async def confirm(self, owner, payload, description, future=None):
         token = self.storage.confirm(owner, payload)
+        if future is not None:
+            self.pending[token] = future
         keyboard = InlineKeyboardMarkup(
             [
                 [
@@ -107,9 +111,13 @@ class Controller:
                 ]
             ]
         )
-        await self.notify(
-            owner, description + "\nПодтверждение действует 5 минут.", keyboard
-        )
+        try:
+            await self.notify(
+                owner, description + "\nПодтверждение действует 5 минут.", keyboard
+            )
+        except BaseException:
+            self.pending.pop(token, None)
+            raise
         return token
 
     async def ask(self, owner, method, params):
@@ -140,8 +148,8 @@ class Controller:
             owner,
             {"action": "codex"},
             "Codex запрашивает разрешение:\n" + json.dumps(params, ensure_ascii=False),
+            future=future,
         )
-        self.pending[token] = future
         try:
             return await asyncio.wait_for(future, 300)
         finally:
@@ -162,16 +170,20 @@ class Controller:
                 kind, value = query.data.split(":", 1)
                 if kind in ("yes", "no"):
                     payload = self.storage.consume(owner, value)
-                    await query.edit_message_reply_markup(reply_markup=None)
                     if payload["action"] == "codex":
                         future = self.pending.get(value)
                         if not future or future.done():
                             raise ValueError("Codex request no longer active")
                         future.set_result(kind == "yes")
+                        logger.info("Codex approval %s: %s", value, kind)
                     elif kind == "yes":
                         self.spawn(self.operation(owner, payload["action"], payload))
                     else:
                         await self.notify(owner, "Операция отклонена.")
+                    try:
+                        await query.edit_message_reply_markup(reply_markup=None)
+                    except Exception:  # noqa: BLE001 -- decision is already applied
+                        logger.warning("Could not remove confirmation buttons")
                     return
                 command, argument = value, ""
             else:
@@ -197,7 +209,9 @@ class Controller:
                     return
                 command, _, argument = text.partition(" ")
                 command = command[1:].split("@")[0]
-            if command in ("start", "help"):
+            if command == "menu":
+                await self.notify(owner, "Управление OPS Dev Agent", self.keyboard())
+            elif command in ("start", "help"):
                 await self.notify(
                     owner,
                     "OPS Dev Agent\n" + "\n".join("/" + c for c in COMMANDS),
@@ -322,6 +336,15 @@ class Controller:
                         prepared = await self.deploy.prepare()
                     if action == "push":
                         await self.git.publication_check()
+                        await self.notify(owner, "Проверки перед публикацией запущены.")
+                        before_tests = await self.git.fingerprint()
+                        checks = await self.tests.execute()
+                        if not checks["passed"]:
+                            raise ValueError("Публикация заблокирована: " + str(checks))
+                        if before_tests != await self.git.fingerprint():
+                            raise ValueError(
+                                "Код изменился во время проверок; повторите /push."
+                            )
                     payload = {
                         "action": action,
                         "fingerprint": await self.git.fingerprint(),
@@ -332,7 +355,7 @@ class Controller:
                         "pull": "Получить origin и обновить текущую чистую ветку только fast-forward.",
                         "restart": "Остановить управляемый OPS Bot и запустить его снова.",
                         "deploy": "Остановить OPS Bot и запустить проверенный коммит из отдельного каталога версии.",
-                        "rollback": "Остановить OPS Bot и запустить предыдущую версию без изменения рабочих файлов.",
+                        "rollback": "Остановить OPS Bot, восстановить предыдущую версию кода и снимок SQLite до деплоя. Изменения данных после деплоя будут отменены; перед откатом сохраняется текущая БД.",
                     }[action]
                     await self.confirm(
                         owner, payload, description + "\n" + await self.git.review()
@@ -356,11 +379,25 @@ class Controller:
         )
 
         async def start(app):
+            try:
+                await app.bot.set_my_commands(
+                    [
+                        ("menu", "Кнопки управления"),
+                        ("help", "Все команды Dev Agent"),
+                    ]
+                )
+            except TelegramError as exc:
+                logger.warning("Command menu update failed: %s", self.redact(exc))
             self.spawn(self.tasks.worker(self.notify, self.ask))
 
             async def broadcast(text):
                 for owner in self.config.admins:
-                    await self.notify(owner, text)
+                    try:
+                        await self.notify(owner, text)
+                    except TelegramError as exc:
+                        logger.warning(
+                            "Monitor notification failed: %s", self.redact(exc)
+                        )
 
             self.spawn(self.supervisor.monitor(broadcast, self.tasks.lock))
 

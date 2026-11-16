@@ -7,6 +7,8 @@ from pathlib import Path
 
 import psutil
 from dotenv import dotenv_values
+from telegram import Bot
+from telegram.error import TelegramError
 
 from .config import ROOT
 from .process import group_options
@@ -118,8 +120,14 @@ class Supervisor:
         versions = (ROOT / "data" / "dev_agent" / "releases").resolve()
         if release != ROOT and not release.is_relative_to(versions):
             raise ValueError("Release path outside allowed directories")
-        env = dict(os.environ)
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k.upper() != "BBOT_TOKEN" and not k.upper().startswith("DEV_AGENT_")
+        }
         stop_file = ROOT / "data" / "dev_agent" / ("stop-" + secrets.token_hex(12))
+        ready_file = stop_file.with_name(stop_file.name + "-ready")
+        ready_file.parent.mkdir(parents=True, exist_ok=True)
         self.storage.put("stop_file", str(stop_file))
         env.update(
             {
@@ -136,7 +144,13 @@ class Supervisor:
             OPS_INSTANCE_LOCK=str(ROOT / "data" / "ops_bot.lock"),
             PYTHONUNBUFFERED="1",
             OPS_STOP_FILE=str(stop_file),
+            OPS_READY_FILE=str(ready_file),
         )
+        # Initialize a fresh database before checking it read-only at startup.
+        database = ROOT / "data" / "agent.db"
+        with sqlite3.connect(database) as db:
+            if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise RuntimeError("OPS database quick_check failed")
         self.log.write_text("", encoding="utf-8")
         entry = str(release / "main.py")
         self.child = await asyncio.create_subprocess_exec(
@@ -158,13 +172,45 @@ class Supervisor:
             asyncio.create_task(self.pump(self.child.stdout)),
             asyncio.create_task(self.pump(self.child.stderr)),
         ]
-        await asyncio.sleep(3)
+        try:
+            bot_source = release / "bot" / "bot.py"
+            legacy_token = None
+            if bot_source.is_file() and "OPS_READY_FILE" not in bot_source.read_text(
+                encoding="utf-8"
+            ):
+                legacy_token = env.get("TELEGRAM_BOT_TOKEN", "")
+            return await self.check_startup(ready_file, legacy_token)
+        except asyncio.CancelledError:
+            await self.stop()
+            raise
+        except (RuntimeError, OSError, sqlite3.Error, TelegramError, TimeoutError):
+            await self.stop()
+            raise
+
+    async def probe_telegram(self, token):
+        if not token:
+            raise RuntimeError("Telegram bot token missing for legacy startup check")
+        async with asyncio.timeout(20), Bot(token=token):
+            # Bot.initialize in __aenter__ performs getMe against Telegram.
+            pass
+
+    async def check_startup(self, ready_file, legacy_token=None):
+        if legacy_token is not None:
+            await asyncio.sleep(3)
+            if self.child.returncode is None:
+                await self.probe_telegram(legacy_token)
+        else:
+            for _ in range(30):
+                if self.child.returncode is not None or ready_file.is_file():
+                    break
+                await asyncio.sleep(1)
         if self.child.returncode is not None:
             raise RuntimeError("OPS Bot exited during startup; see /logs")
-        # This is deliberately partial health, not proof of Telegram connectivity.
+        if legacy_token is None and not ready_file.is_file():
+            raise RuntimeError("OPS Telegram initialization timed out; see /logs")
         try:
             with sqlite3.connect(
-                f"file:{ROOT / 'data' / 'agent.db'}?mode=ro", uri=True
+                (ROOT / "data" / "agent.db").resolve().as_uri() + "?mode=ro", uri=True
             ) as db:
                 if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise RuntimeError("OPS database quick_check failed")
@@ -181,7 +227,13 @@ class Supervisor:
         ):
             raise RuntimeError("Critical error in OPS startup log")
         self.storage.put(
-            "health", "partial: process alive, SQLite OK; Telegram not verified"
+            "health",
+            "startup OK: process alive, SQLite OK; "
+            + (
+                "legacy Telegram API probe OK; process initialization not verified"
+                if legacy_token is not None
+                else "Telegram initialized; polling not verified"
+            ),
         )
         return self.status()
 
@@ -210,6 +262,8 @@ class Supervisor:
                         if self.storage.get("process") != expected or self.owned():
                             continue
                         await self.start()
-                    await notify("OPS Bot recovered; startup health is partial.")
-                except (RuntimeError, OSError) as exc:
+                    await notify(
+                        "OPS Bot recovered; Telegram initialized, polling not verified."
+                    )
+                except (RuntimeError, OSError, TelegramError) as exc:
                     await notify("OPS recovery failed: " + self.redact(exc))

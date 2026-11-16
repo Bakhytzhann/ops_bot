@@ -92,9 +92,7 @@ class GitManager:
         # Check remote-only commits as well as current files.
         await self.git("fetch", "origin")
         upstream = "refs/remotes/origin/" + identity["branch"]
-        remote_branch = await self.git(
-            "for-each-ref", "--format=%(refname)", upstream
-        )
+        remote_branch = await self.git("for-each-ref", "--format=%(refname)", upstream)
         if upstream in remote_branch.splitlines():
             await self.git("merge-base", "--is-ancestor", upstream, "HEAD")
             outgoing = [upstream + "..HEAD"]

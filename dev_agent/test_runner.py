@@ -24,6 +24,7 @@ class TestRunner:
                 "main.py",
             ],
             ["-m", "ruff", "check", "."],
+            ["-m", "ruff", "format", "--check", "."],
             ["-m", "pytest", "-q"],
         ]
         for command in commands:

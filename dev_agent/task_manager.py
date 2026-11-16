@@ -16,6 +16,12 @@ class TaskManager:
         self.execution = None
         self.bridge = None
 
+    async def notify_safely(self, notify, owner, text):
+        try:
+            await notify(owner, text)
+        except Exception as exc:  # noqa: BLE001 -- delivery must not stop the queue
+            logger.warning("Task notification failed: %s", self.redact(exc))
+
     def enqueue(self, owner, prompt, current=None):
         if self.redact(prompt) != prompt:
             raise ValueError("Do not include secrets in task text")
@@ -54,6 +60,11 @@ class TaskManager:
 
     async def execute(self, task, notify, ask):
         task_id, owner = task["id"], task["owner"]
+        deliver = notify
+
+        async def notify(owner, text):
+            await self.notify_safely(deliver, owner, text)
+
         try:
             saved = self.storage.get(f"task_files:{task_id}")
             if not task["thread"] or not saved:
@@ -106,10 +117,21 @@ class TaskManager:
                 result=self.redact(result[-6000:]),
                 prompt="",
             )
+            failure = next((r for r in checks.get("results", []) if r["code"]), None)
+            diagnostics = (
+                "Failed check: "
+                + " ".join(failure["command"])
+                + "\n"
+                + failure["output"][-2500:]
+                + "\n"
+                if failure
+                else ""
+            )
             await notify(
                 owner,
-                f"Task #{task_id} completed.\n{result[-5000:]}\n"
+                f"Task #{task_id} completed.\n"
                 f"Tests: {'passed' if checks['passed'] else 'FAILED'}\n"
+                f"{diagnostics}"
                 f"{await self.git.review()}\nPublication requires /push confirmation.\n"
                 f"OPS Bot: {self.supervisor.status()}",
             )
@@ -144,5 +166,7 @@ class TaskManager:
                 except asyncio.CancelledError:
                     if asyncio.current_task().cancelling():
                         raise
+                except Exception as exc:  # noqa: BLE001 -- isolate each queued task
+                    logger.error("Queue task failed: %s", self.redact(exc))
                 finally:
                     self.active, self.execution = None, None

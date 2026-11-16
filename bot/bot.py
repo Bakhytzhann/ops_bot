@@ -356,6 +356,12 @@ async def setup_telegram(application):
         timing_logger.warning(
             "Telegram command menu setup failed: {}", type(exc).__name__
         )
+    import os
+    from pathlib import Path
+
+    if ready_file := os.environ.get("OPS_READY_FILE"):
+        # PTB has initialized its Bot via getMe before invoking post_init.
+        Path(ready_file).write_text("telegram initialized", encoding="utf-8")
 
 
 async def screen_message_handler(update, context):

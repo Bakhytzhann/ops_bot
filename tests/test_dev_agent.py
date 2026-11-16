@@ -109,9 +109,8 @@ def test_retention_removes_content_and_session_reference(store):
 def test_redaction_and_logging(redactor):
     import logging
 
-    text = (
-        "my-long-private-credential 123456789:abcdefghijklmnopqrstuvwxyz password=hello"
-    )
+    token = "123456789:" + "abcdefghijklmnopqrstuvwxyz"
+    text = "my-long-private-credential " + token + " password=hello"
     result = redactor(text)
     assert "my-long" not in result and "abcdefghijklmnopqrstuvwxyz" not in result
     assert "hello" not in result
@@ -392,7 +391,9 @@ async def test_bridge_eof_and_timeout():
 
 @pytest.mark.asyncio
 async def test_deploy_failure_restores_previous_release(store, tmp_path):
-    git = SimpleNamespace(clean=AsyncMock(), fingerprint=AsyncMock(return_value="same"))
+    git = SimpleNamespace(
+        root=tmp_path, clean=AsyncMock(), fingerprint=AsyncMock(return_value="same")
+    )
     supervisor = SimpleNamespace(
         stop=AsyncMock(),
         status=Mock(return_value={"running": True}),
@@ -424,6 +425,8 @@ async def test_deploy_rejects_failed_checks_and_changed_files(store):
 
 @pytest.mark.asyncio
 async def test_rollback_preserves_checkout_and_updates_metadata(store, tmp_path):
+    from dev_agent.database import DatabaseSnapshots
+
     previous = tmp_path / "previous"
     previous.mkdir()
     store.put("previous_release", str(previous))
@@ -431,7 +434,8 @@ async def test_rollback_preserves_checkout_and_updates_metadata(store, tmp_path)
     supervisor = SimpleNamespace(
         stop=AsyncMock(), start=AsyncMock(return_value={"running": True})
     )
-    git = Mock(git=AsyncMock(return_value=""))
+    git = Mock(root=tmp_path, git=AsyncMock(return_value=""))
+    store.put("previous_database_snapshot", DatabaseSnapshots(tmp_path).save())
     deploy = DeployManager(git, Mock(), supervisor, store)
     await deploy.rollback()
     assert store.get("verified_release") == str(previous)
@@ -594,7 +598,7 @@ async def test_full_app_server_turn_and_resume_without_network(monkeypatch, tmp_
     )
     monkeypatch.setattr(
         "dev_agent.codex_bridge.asyncio.create_subprocess_exec",
-        AsyncMock(return_value=child),
+        create := AsyncMock(return_value=child),
     )
     monkeypatch.setattr("dev_agent.codex_bridge.terminate", AsyncMock())
     monkeypatch.setattr(
@@ -611,19 +615,23 @@ async def test_full_app_server_turn_and_resume_without_network(monkeypatch, tmp_
     assert request["params"]["sandbox"] == "workspace-write"
     assert request["params"]["approvalPolicy"] == "on-request"
     assert request["params"]["threadId"] == "thread-1"
+    assert "BBOT_TOKEN" not in create.await_args.kwargs["env"]
+    assert "DEV_AGENT_ADMIN_IDS" not in create.await_args.kwargs["env"]
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("existing_database", [True, False])
 async def test_supervisor_successful_start_uses_shared_data_and_partial_health(
-    store, redactor, tmp_path, monkeypatch
+    store, redactor, tmp_path, monkeypatch, existing_database
 ):
     import sqlite3
 
     monkeypatch.setattr("dev_agent.supervisor.ROOT", tmp_path)
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "dev_agent").mkdir()
-    with sqlite3.connect(tmp_path / "data" / "agent.db") as db:
-        db.execute("CREATE TABLE example(id INTEGER)")
+    if existing_database:
+        with sqlite3.connect(tmp_path / "data" / "agent.db") as db:
+            db.execute("CREATE TABLE example(id INTEGER)")
     child = SimpleNamespace(
         pid=123,
         returncode=None,
@@ -638,16 +646,28 @@ async def test_supervisor_successful_start_uses_shared_data_and_partial_health(
     )
     monkeypatch.setattr("dev_agent.supervisor.psutil.process_iter", lambda *args: [])
     monkeypatch.setattr("dev_agent.supervisor.psutil.Process", lambda pid: process)
-    create = AsyncMock(return_value=child)
+
+    async def spawn(*args, **kwargs):
+        Path(kwargs["env"]["OPS_READY_FILE"]).write_text("ready")
+        return child
+
+    create = AsyncMock(side_effect=spawn)
     monkeypatch.setattr("dev_agent.supervisor.asyncio.create_subprocess_exec", create)
     monkeypatch.setattr("dev_agent.supervisor.asyncio.sleep", AsyncMock())
     supervisor = Supervisor(Config(_env_file=None), store, redactor)
     result = await supervisor.start()
-    assert result["running"] and "partial" in result["health"]
+    assert result["running"] and "Telegram initialized" in result["health"]
     assert create.await_args.kwargs["env"]["DATABASE_PATH"] == str(
         tmp_path / "data" / "agent.db"
     )
     assert store.get("process")["created"] == 10
+    if not existing_database:
+        ready = Path(create.await_args.kwargs["env"]["OPS_READY_FILE"])
+        ready.unlink()
+        supervisor.probe_telegram = AsyncMock()
+        result = await supervisor.check_startup(ready, "legacy-test-token")
+        supervisor.probe_telegram.assert_awaited_once_with("legacy-test-token")
+        assert "legacy Telegram API probe OK" in result["health"]
     await asyncio.gather(*supervisor.pumps)
 
 
@@ -674,8 +694,10 @@ async def test_supervisor_crash_is_not_reported_as_healthy(
     )
     monkeypatch.setattr("dev_agent.supervisor.asyncio.sleep", AsyncMock())
     supervisor = Supervisor(Config(_env_file=None), store, redactor)
+    supervisor.stop = AsyncMock()
     with pytest.raises(RuntimeError, match="exited during startup"):
         await supervisor.start()
+    supervisor.stop.assert_awaited_once()
     assert store.get("health") is None
     await asyncio.gather(*supervisor.pumps)
 
@@ -743,10 +765,340 @@ async def test_callback_confirmation_runs_once(controller, store):
     first.callback_query = query
     await controller.handle(first, None)
     assert controller.spawn.call_count == 1
-    # Close the captured coroutine because this unit test deliberately does not run it.
+    # Close the captured coroutine because this test deliberately does not run it.
     controller.spawn.call_args.args[0].close()
     await controller.handle(first, None)
     second = update("", 201)
     second.callback_query = query
     await controller.handle(second, None)
     assert controller.spawn.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted", [True, False])
+async def test_codex_confirmation_round_trip(controller, accepted):
+    bridge = CodexBridge("codex", Path("."))
+    bridge.send = AsyncMock()
+    bridge.ask = lambda method, params: controller.ask(42, method, params)
+
+    async def click_before_send_returns(owner, text, markup=None):
+        if markup is None:
+            return
+        button = markup.inline_keyboard[0][0 if accepted else 1]
+        message = update("", 701)
+        message.callback_query = SimpleNamespace(
+            data=button.callback_data,
+            answer=AsyncMock(),
+            edit_message_reply_markup=AsyncMock(side_effect=RuntimeError("Telegram")),
+        )
+        await controller.handle(message, None)
+        # A second update carrying the same button cannot apply it again.
+        message.update_id = 702
+        await controller.handle(message, None)
+
+    controller.notify = click_before_send_returns
+    await bridge.event(
+        {
+            "id": 123,
+            "method": "item/commandExecution/requestApproval",
+            "params": {"command": "echo ok"},
+        }
+    )
+    bridge.send.assert_awaited_once_with(
+        {
+            "id": 123,
+            "result": {"decision": "accept" if accepted else "decline"},
+        }
+    )
+    assert not controller.pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted", [True, False])
+async def test_permission_approval_is_turn_scoped(accepted):
+    bridge = CodexBridge("codex", Path("."))
+    bridge.ask = AsyncMock(return_value=accepted)
+    bridge.send = AsyncMock()
+    permissions = {"network": {"enabled": True}}
+    await bridge.event(
+        {
+            "id": 55,
+            "method": "item/permissions/requestApproval",
+            "params": {"permissions": permissions},
+        }
+    )
+    result = bridge.send.await_args.args[0]["result"]
+    assert result == {"permissions": permissions if accepted else {}, "scope": "turn"}
+    path = Path("data/dev_agent_schema/PermissionsRequestApprovalResponse.json")
+    if path.exists():
+        import jsonschema
+
+        jsonschema.validate(result, json.loads(path.read_text()))
+
+
+@pytest.mark.asyncio
+async def test_duplicate_agent_item_is_forwarded_once():
+    bridge = CodexBridge("codex", Path("."))
+    bridge.answers = []
+    bridge.progress = AsyncMock()
+    event = {
+        "method": "item/completed",
+        "params": {
+            "item": {
+                "id": "message-1",
+                "type": "agentMessage",
+                "text": "Done",
+            }
+        },
+    }
+    await bridge.event(event)
+    await bridge.event(event)
+    bridge.progress.assert_awaited_once_with("Done")
+    assert bridge.answers == ["Done"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("passed", [True, False])
+async def test_task_summary_does_not_repeat_agent_text(
+    controller, store, monkeypatch, passed
+):
+    async def execute(prompt, thread, ask, progress, save):
+        await progress("Unique final answer")
+        return "Unique final answer"
+
+    monkeypatch.setattr(
+        "dev_agent.task_manager.CodexBridge",
+        Mock(return_value=SimpleNamespace(execute=execute)),
+    )
+    task_id = store.create(42, "Fix date")
+    controller.tests.execute.return_value = {
+        "passed": passed,
+        "results": [
+            {
+                "command": ["-m", "pytest", "-q"],
+                "code": 0 if passed else 1,
+                "output": "Specific test failure",
+            }
+        ],
+    }
+    notify = AsyncMock()
+    await controller.tasks.execute(store.task(task_id), notify, AsyncMock())
+    messages = [call.args[1] for call in notify.await_args_list]
+    assert sum("Unique final answer" in message for message in messages) == 1
+    assert store.task(task_id)["result"] == "Unique final answer"
+    assert ("Specific test failure" in messages[-1]) is (not passed)
+
+
+def test_shell_environment_keeps_windows_paths_without_tokens(monkeypatch):
+    import tomllib
+
+    from dev_agent.codex_bridge import shell_environment_override
+
+    monkeypatch.setenv("PATH", r"C:\Windows\System32;C:\tools")
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    monkeypatch.setenv("BBOT_TOKEN", "private-bot-token")
+    override = shell_environment_override()
+    values = tomllib.loads(override)["shell_environment_policy"]["set"]
+    assert values["PATH"] == r"C:\Windows\System32;C:\tools"
+    assert any(key.upper() == "SYSTEMROOT" for key in values)
+    assert "private-bot-token" not in override
+
+
+@pytest.mark.asyncio
+async def test_worker_survives_telegram_outage_and_runs_next_task(
+    controller, store, monkeypatch
+):
+    bridge = Mock(execute=AsyncMock(return_value="done"))
+    monkeypatch.setattr("dev_agent.task_manager.CodexBridge", Mock(return_value=bridge))
+    first = store.create(42, "First")
+    second = store.create(42, "Second")
+    worker = asyncio.create_task(
+        controller.tasks.worker(
+            AsyncMock(side_effect=ConnectionError("Telegram unavailable")), AsyncMock()
+        )
+    )
+    try:
+        async with asyncio.timeout(3):
+            while store.task(second)["status"] != "completed":
+                await asyncio.sleep(0.01)
+        assert store.task(first)["status"] == "completed"
+        assert not worker.done()
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_push_requires_passing_tests_and_unchanged_files(controller):
+    controller.git.publication_check = AsyncMock()
+    controller.git.push = AsyncMock()
+    controller.tests.execute.return_value = {"passed": False}
+    controller.confirm = AsyncMock()
+    await controller.operation(42, "push")
+    controller.confirm.assert_not_awaited()
+    controller.git.push.assert_not_awaited()
+    controller.tests.execute.return_value = {"passed": True}
+    controller.git.fingerprint.side_effect = ["before", "changed"]
+    await controller.operation(42, "push")
+    controller.confirm.assert_not_awaited()
+    controller.git.fingerprint.side_effect = None
+    await controller.operation(42, "push")
+    payload = controller.confirm.await_args.args[1]
+    await controller.operation(42, "push", payload)
+    controller.git.push.assert_awaited_once()
+
+
+def test_database_snapshot_restores_wal_and_rejects_external_path(tmp_path):
+    import sqlite3
+
+    from dev_agent.database import DatabaseSnapshots
+
+    snapshots = DatabaseSnapshots(tmp_path)
+    snapshots.database.parent.mkdir(parents=True)
+    with sqlite3.connect(snapshots.database) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("CREATE TABLE example(value INTEGER)")
+        db.execute("INSERT INTO example VALUES(1)")
+        db.commit()
+        snapshot = snapshots.save()
+        db.execute("UPDATE example SET value=2")
+        db.commit()
+        snapshots.restore(snapshot)
+        assert db.execute("SELECT value FROM example").fetchone()[0] == 1
+    with pytest.raises(ValueError, match="Invalid database snapshot"):
+        snapshots.restore(str(snapshots.database))
+
+
+@pytest.mark.asyncio
+async def test_failed_deploy_restores_original_database(store, tmp_path):
+    import sqlite3
+
+    from dev_agent.database import DatabaseSnapshots
+
+    snapshots = DatabaseSnapshots(tmp_path)
+    snapshots.save()
+    with sqlite3.connect(snapshots.database) as db:
+        db.execute("CREATE TABLE example(value INTEGER)")
+        db.execute("INSERT INTO example VALUES(1)")
+
+    async def start(release):
+        if release != "previous":
+            with sqlite3.connect(snapshots.database) as db:
+                db.execute("UPDATE example SET value=2")
+            raise RuntimeError("New version failed")
+
+    supervisor = SimpleNamespace(
+        stop=AsyncMock(),
+        start=AsyncMock(side_effect=start),
+        status=lambda: {"running": True},
+    )
+    git = SimpleNamespace(
+        root=tmp_path, clean=AsyncMock(), fingerprint=AsyncMock(return_value="same")
+    )
+    store.put("verified_release", "previous")
+    deploy = DeployManager(git, Mock(), supervisor, store)
+    deploy.release = AsyncMock(return_value=tmp_path / "candidate")
+    with pytest.raises(RuntimeError, match="New version failed"):
+        await deploy.deploy({"fingerprint": "same", "commit": "abc"})
+    with sqlite3.connect(snapshots.database) as db:
+        assert db.execute("SELECT value FROM example").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_real_app_server_initialize_without_model(tmp_path):
+    import shutil
+
+    from dev_agent.codex_bridge import runtime_environment, shell_environment_override
+    from dev_agent.process import group_options, terminate
+
+    executable = shutil.which("codex")
+    if not executable:
+        pytest.skip("Codex CLI is not installed; local integration check only")
+    environment = runtime_environment()
+    environment["CODEX_HOME"] = str(tmp_path)
+    process = await asyncio.create_subprocess_exec(
+        executable,
+        "-c",
+        'shell_environment_policy.inherit="none"',
+        "-c",
+        shell_environment_override(),
+        "app-server",
+        "--stdio",
+        cwd=tmp_path,
+        env=environment,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        **group_options(),
+    )
+    bridge = CodexBridge(executable, tmp_path, timeout=20)
+    bridge.process = process
+    try:
+        result = await bridge.request(
+            "initialize",
+            {
+                "clientInfo": {"name": "ops_dev_agent_test", "version": "1.0"},
+                "capabilities": {"experimentalApi": True},
+            },
+        )
+        assert "userAgent" in result
+    finally:
+        await terminate(process)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_start", [False, True])
+async def test_rollback_restores_data_and_recovers_on_failure(
+    store, tmp_path, failed_start
+):
+    import sqlite3
+
+    from dev_agent.database import DatabaseSnapshots
+
+    snapshots = DatabaseSnapshots(tmp_path)
+    snapshots.save()
+    with sqlite3.connect(snapshots.database) as db:
+        db.execute("CREATE TABLE example(value INTEGER)")
+        db.execute("INSERT INTO example VALUES(1)")
+    store.put("previous_database_snapshot", snapshots.save())
+    with sqlite3.connect(snapshots.database) as db:
+        db.execute("UPDATE example SET value=2")
+    previous = tmp_path / "previous"
+    previous.mkdir()
+    store.put("previous_release", str(previous))
+    store.put("verified_release", "current")
+
+    async def start(release):
+        with sqlite3.connect(snapshots.database) as db:
+            value = db.execute("SELECT value FROM example").fetchone()[0]
+            assert value == (2 if release == "current" else 1)
+            if failed_start and release != "current":
+                db.execute("UPDATE example SET value=3")
+                db.commit()
+                raise RuntimeError("Old version failed")
+
+    supervisor = SimpleNamespace(stop=AsyncMock(), start=AsyncMock(side_effect=start))
+    git = SimpleNamespace(root=tmp_path, git=AsyncMock(return_value=""))
+    deploy = DeployManager(git, Mock(), supervisor, store)
+    if failed_start:
+        with pytest.raises(RuntimeError, match="Old version failed"):
+            await deploy.rollback()
+        assert store.get("verified_release") == "current"
+    else:
+        await deploy.rollback()
+        assert store.get("verified_release") == str(previous)
+    with sqlite3.connect(snapshots.database) as db:
+        assert db.execute("SELECT value FROM example").fetchone()[0] == (
+            2 if failed_start else 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_startup_rejects_process_without_telegram_ready_file(
+    store, redactor, tmp_path, monkeypatch
+):
+    supervisor = Supervisor(Config(_env_file=None), store, redactor)
+    supervisor.child = SimpleNamespace(returncode=None)
+    monkeypatch.setattr("dev_agent.supervisor.asyncio.sleep", AsyncMock())
+    with pytest.raises(RuntimeError, match="Telegram initialization timed out"):
+        await supervisor.check_startup(tmp_path / "missing-ready")
