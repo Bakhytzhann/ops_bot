@@ -77,10 +77,9 @@ async def load_foreflight(flight, partial=None):
         data = detail.get("flightData") or {}
         performance = detail.get("performance") or {}
         times = performance.get("times") or {}
-        has_ete = duration(times.get("timeToDestinationMinutes")) != "нет данных"
-        lines = [
-            "EET " + duration(times.get("timeToDestinationMinutes")).split(" (")[0]
-        ]
+        eet = duration(times.get("timeToDestinationMinutes")).split(" (")[0]
+        has_ete = eet != "нет данных"
+        lines = ["EET " + eet]
         errors = bool(
             detail.get("errors")
             or performance.get("errors")
@@ -97,7 +96,7 @@ async def load_foreflight(flight, partial=None):
             details={
                 "basis": basis,
                 "has_ete": has_ete,
-                "eet": duration(times.get("timeToDestinationMinutes")).split(" (")[0],
+                "eet": eet,
                 "eet_minutes": times.get("timeToDestinationMinutes"),
             },
         )

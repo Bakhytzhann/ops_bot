@@ -1,5 +1,7 @@
 import logging
+import os
 import sys
+from pathlib import Path
 
 from bot.bot import run_bot
 from config.logging_config import setup_logging
@@ -9,6 +11,16 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    from dev_agent.locking import FileLock
+
+    instance_lock = FileLock(
+        Path(
+            os.environ.get(
+                "OPS_INSTANCE_LOCK",
+                str(Path(__file__).resolve().parent / "data" / "ops_bot.lock"),
+            )
+        )
+    )
     setup_logging()
 
     logging.basicConfig(
@@ -36,6 +48,8 @@ def main():
     except Exception:
         logger.exception("OPS Bot startup failed")
         sys.exit(1)
+    finally:
+        instance_lock.close()
 
 
 if __name__ == "__main__":

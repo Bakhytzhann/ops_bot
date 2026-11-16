@@ -7,20 +7,11 @@ from urllib.parse import urlsplit
 
 from integrations.foreflight.api_client import ForeFlightClient, ForeFlightError
 from integrations.leon.operations import resolve_flight
+from services.snapshot_models import utc as instant
 
 
 def normalized(value):
     return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
-
-
-def instant(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        result = datetime.fromisoformat(value)
-        return result.astimezone(UTC) if result.tzinfo else None
-    except ValueError:
-        return None
 
 
 def flight_rows(result):
@@ -37,35 +28,33 @@ def flight_rows(result):
 
 async def find_flight(client, number, day, leon=None):
     start = datetime.combine(date.fromisoformat(day), datetime.min.time(), tzinfo=UTC)
-    rows = flight_rows(await client.list_flights(start, start + timedelta(days=1)))
+    end = start + timedelta(days=1)
+    rows = flight_rows(await client.list_flights(start, end))
     rows = [
-        r
+        (r, departure)
         for r in rows
-        if instant(r.get("departureTime")) is not None
-        and start <= instant(r["departureTime"]) < start + timedelta(days=1)
+        if (departure := instant(r.get("departureTime"))) is not None
+        and start <= departure < end
     ]
     number = normalized(number)
-    matches = [r for r in rows if normalized(r.get("callSign")) == number]
+    matches = [r for r, _ in rows if normalized(r.get("callSign")) == number]
     basis = "номер/позывной и дата"
     if not matches and leon:
         departure = instant(leon.get("departureUTC"))
+        origin = normalized(leon.get("departure"))
+        destination = normalized(leon.get("arrival"))
+        aircraft = normalized(leon.get("aircraft"))
         matches = [
             r
-            for r in rows
-            if all(
-                (
-                    normalized(leon.get("departure")),
-                    normalized(leon.get("arrival")),
-                    normalized(leon.get("aircraft")),
-                )
-            )
-            and normalized(r.get("departure")) == normalized(leon["departure"])
-            and normalized(r.get("destination")) == normalized(leon["arrival"])
-            and normalized(r.get("aircraftRegistration"))
-            == normalized(leon["aircraft"])
+            for r, scheduled in rows
+            if origin
+            and destination
+            and aircraft
             and departure is not None
-            and instant(r.get("departureTime")) is not None
-            and abs((instant(r["departureTime"]) - departure).total_seconds()) <= 3600
+            and normalized(r.get("departure")) == origin
+            and normalized(r.get("destination")) == destination
+            and normalized(r.get("aircraftRegistration")) == aircraft
+            and abs((scheduled - departure).total_seconds()) <= 3600
         ]
         basis = "аэропорты, борт и вылет в пределах 60 минут"
     if not matches:

@@ -54,13 +54,12 @@ async def selected_flight_weather(
     for source, result in zip(("Leon MCP", "AWC"), results, strict=True):
         if isinstance(result, Exception):
             errors.append(f"{source}: ошибка получения ({type(result).__name__}).")
+        elif source == "Leon MCP":
+            reports.extend(leon_reports(result, include_taf))
         else:
-            if source == "Leon MCP":
-                reports.extend(leon_reports(result, include_taf))
-            else:
-                awc_rows, awc_errors = awc_reports(result, include_taf)
-                reports.extend(awc_rows)
-                errors.extend(awc_errors)
+            awc_rows, awc_errors = awc_reports(result, include_taf)
+            reports.extend(awc_rows)
+            errors.extend(awc_errors)
     lines.append(format_reports(reports, errors))
     return {
         "answer": "\n\n".join(lines),
@@ -108,23 +107,20 @@ async def route_operation(question: str) -> str | None:
         include_taf = bool(re.search(r"\b(?:taf|таф)\b", question, re.IGNORECASE))
         match = FLIGHT_PATTERN.search(question)
         if not match:
-            if weather:
-                codes = re.findall(r"\b[A-Z]{4}\b", question.upper())
-                codes = [c for c in codes if c not in {"TAFS"}]
-                if codes:
-                    return format_awc_weather(
-                        await get_weather(codes, include_taf=include_taf), include_taf
-                    )
+            codes = [
+                c for c in re.findall(r"\b[A-Z]{4}\b", question.upper()) if c != "TAFS"
+            ]
+            if codes:
+                return format_awc_weather(
+                    await get_weather(codes, include_taf=include_taf), include_taf
+                )
             return "Укажите ICAO или номер рейса и дату."
         period = parse_schedule_period(question)
         if not period or period.start != period.end:
             return "Для рейса укажите одну дату (UTC), например 2026-11-11."
         number = re.sub(r"[\s-]", "", match.group()).upper()
         day = period.start.isoformat()
-        parts = []
-        if weather:
-            parts.append((await flight_weather(number, day, include_taf))["answer"])
-        return "\n\n".join(parts)
+        return (await flight_weather(number, day, include_taf))["answer"]
 
     period = parse_schedule_period(question)
     if not period:

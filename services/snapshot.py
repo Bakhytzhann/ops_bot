@@ -90,8 +90,8 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
                 )
             },
         )
-        if utc(crew.get("fetched_at")):
-            snapshot.blocks["crew"].fetched_at = utc(crew["fetched_at"])
+        if fetched_at := utc(crew.get("fetched_at")):
+            snapshot.blocks["crew"].fetched_at = fetched_at
         await emit()
         snapshot.blocks["duty"] = await cached(
             ("duty", *version, repr(crew["crew"])),
@@ -113,8 +113,8 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
             "partial" if result.get("partial") else "ready",
             details={"include_taf": True, "reports": list(result.get("reports", []))},
         )
-        if utc(result.get("fetched_at")):
-            snapshot.blocks["weather"].fetched_at = utc(result["fetched_at"])
+        if fetched_at := utc(result.get("fetched_at")):
+            snapshot.blocks["weather"].fetched_at = fetched_at
 
     async def foreflight():
         snapshot.blocks.update(

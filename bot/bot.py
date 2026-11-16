@@ -392,7 +392,37 @@ def create_application():
 def run_bot():
     application = create_application()
     print("OPS Bot · private authorized chats · button-driven operations")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    import os
+
+    stop_file = os.environ.get("OPS_STOP_FILE")
+    if not stop_file:
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+        )
+        return
+    import asyncio
+    import threading
+    from pathlib import Path
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    finished = threading.Event()
+
+    def watch_stop():
+        while not finished.wait(0.5):
+            if Path(stop_file).is_file():
+                loop.call_soon_threadsafe(application.stop_running)
+                return
+
+    watcher = threading.Thread(target=watch_stop, daemon=True)
+    watcher.start()
+    try:
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+        )
+    finally:
+        finished.set()
+        watcher.join(timeout=2)
 
 
 if __name__ == "__main__":

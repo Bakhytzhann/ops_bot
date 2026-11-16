@@ -168,12 +168,10 @@ def full_weather(snapshot, preferences=None):
                 )
                 # Raw METAR carries observation time, raw TAF carries issue/validity.
                 raw = entry["raw"]
-                if (
+                if entry.get("metadata") and (
                     not metar_stamp(raw)
-                    and entry.get("metadata")
                     or product == "TAF"
                     and not re.search(r"\b\d{4}/\d{4}\b", raw)
-                    and entry.get("metadata")
                 ):
                     lines.append(entry["metadata"])
                 lines.append(raw)
