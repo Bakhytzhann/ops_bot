@@ -260,8 +260,8 @@ def test_home_keyboard_persists():
 async def test_start_shows_compact_default_keyboard(context):
     u = update(text="/start@OPS_bot")
     await bot.handle_message(u, context)
-    u.effective_message.reply_text.assert_awaited_once()
-    assert "шесть кнопок" in u.effective_message.reply_text.call_args.args[0]
+    # The keyboard is installed by screen_message_handler, not this direct handler.
+    u.effective_message.reply_text.assert_not_awaited()
 
 
 def test_real_crew_shape_shows_name_and_position_without_contacts():

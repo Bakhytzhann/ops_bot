@@ -200,7 +200,7 @@ class MainScreen:
         if old_id and old_id != self.message_id:
             try:
                 await bot.delete_message(chat_id=self.chat_id, message_id=old_id)
-            except TelegramError:
+            except (AttributeError, TelegramError):
                 # Cleanup failure must never hide the successfully loaded result.
                 pass
 

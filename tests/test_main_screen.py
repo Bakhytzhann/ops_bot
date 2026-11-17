@@ -63,15 +63,14 @@ def test_utf16_pagination():
 async def test_start_installs_keyboard_then_one_editable_screen(screen_context):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
-    assert ctx.bot.send_message.await_count == 2
+    assert ctx.bot.send_message.await_count == 1
     assert (
         ctx.bot.send_message.call_args_list[0].kwargs["reply_markup"] == home_keyboard()
     )
-    screen_id = ctx.user_data["main_screen_message_id"]
+    assert "main_screen_message_id" not in ctx.user_data
     await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
-    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] != screen_id
-    assert ctx.bot.send_message.await_count == 3
-    assert ctx.bot.delete_message.await_count >= 1
+    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] == ctx.user_data["main_screen_message_id"]
+    assert ctx.bot.send_message.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -213,8 +212,11 @@ async def test_main_screen_does_not_append_duplicate_menu(screen_context):
 async def test_restart_uses_new_transient_screen(screen_context):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
     old = ctx.user_data["main_screen_message_id"]
     await bot.screen_message_handler(update_for("/start"), ctx)
+    assert "main_screen_message_id" not in ctx.user_data
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
     assert ctx.user_data["main_screen_message_id"] != old
     assert ctx.bot.send_message.await_count == 4
 
@@ -223,6 +225,7 @@ async def test_restart_uses_new_transient_screen(screen_context):
 async def test_deleted_screen_is_recreated_and_timeout_is_not_masked(screen_context):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
     old = ctx.user_data["main_screen_message_id"]
     ctx.bot.edit_message_text.side_effect = BadRequest("Message to edit not found")
     await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
