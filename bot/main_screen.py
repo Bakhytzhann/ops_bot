@@ -5,6 +5,7 @@ of message ownership. Access notifications remain separate from navigation.
 """
 
 import asyncio
+from contextlib import suppress
 from secrets import token_hex
 from weakref import WeakValueDictionary
 
@@ -199,11 +200,9 @@ class MainScreen:
         state["last_completed_screen_id"] = self.message_id
         state.pop("pending_screen_message_id", None)
         if old_id and old_id != self.message_id:
-            try:
+            # Cleanup must not hide a successfully loaded result.
+            with suppress(AttributeError, TelegramError):
                 await bot.delete_message(chat_id=self.chat_id, message_id=old_id)
-            except (AttributeError, TelegramError):
-                # Cleanup failure must never hide the successfully loaded result.
-                pass
 
 
 class ScreenMessage:
@@ -338,12 +337,10 @@ async def dispatch_screen(update, context, handler):
     elif not query and text in HOME_ACTIONS:
         # Reply keyboard sends a real chat message. Remove only these six
         # service commands; leave ordinary user input and slash commands alone.
-        try:
+        with suppress(AttributeError, TelegramError):
             await context.bot.delete_message(
                 chat_id=screen.chat_id, message_id=update.effective_message.message_id
             )
-        except (AttributeError, TelegramError):
-            pass
 
         # A new message puts the active work below the old, still readable
         # result. Keep the previous completed screen until a result is rendered.
@@ -353,12 +350,10 @@ async def dispatch_screen(update, context, handler):
                 return
             previous_pending = context.user_data.pop("pending_screen_message_id", None)
             if previous_pending:
-                try:
+                with suppress(TelegramError):
                     await context.bot.delete_message(
                         chat_id=screen.chat_id, message_id=previous_pending
                     )
-                except TelegramError:
-                    pass
             if not context.user_data.get("home_keyboard_installed"):
                 await screen.install_keyboard()
             status = await context.bot.send_message(
