@@ -14,11 +14,13 @@ from telegram import (
     InlineKeyboardMarkup,
     MessageEntity,
 )
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 
-from bot.keyboards import home_keyboard
+from bot.keyboards import QUICK_ACTIONS, home_keyboard
 
 _write_locks = WeakValueDictionary()
+HOME_ACTIONS = {label for row in QUICK_ACTIONS for label in row}
+
 
 PAGE_SIZE = 3900
 
@@ -157,15 +159,18 @@ class MainScreen:
             bot = self.context.bot
             if self.message_id is not None:
                 try:
-                    return await bot.edit_message_text(
+                    result = await bot.edit_message_text(
                         chat_id=self.chat_id,
                         message_id=self.message_id,
                         text=text,
                         **kwargs,
                     )
+                    await self._finish_screen(bot)
+                    return result
                 except BadRequest as exc:
                     error = str(exc).lower()
                     if error.startswith("message is not modified"):
+                        await self._finish_screen(bot)
                         return self
                     if not any(
                         reason in error
@@ -181,7 +186,23 @@ class MainScreen:
             message = await bot.send_message(chat_id=self.chat_id, text=text, **kwargs)
             self.message_id = message.message_id
             self.context.user_data["main_screen_message_id"] = self.message_id
+            await self._finish_screen(bot)
             return message
+
+    async def _finish_screen(self, bot):
+        """Retire the last completed screen only after its replacement renders."""
+        state = self.context.user_data
+        if self.generation != state.get("screen_generation", 0):
+            return
+        old_id = state.get("last_completed_screen_id")
+        state["last_completed_screen_id"] = self.message_id
+        state.pop("pending_screen_message_id", None)
+        if old_id and old_id != self.message_id:
+            try:
+                await bot.delete_message(chat_id=self.chat_id, message_id=old_id)
+            except TelegramError:
+                # Cleanup failure must never hide the successfully loaded result.
+                pass
 
 
 class ScreenMessage:
@@ -284,6 +305,8 @@ async def dispatch_screen(update, context, handler):
 
     if restarting:
         context.user_data.pop("main_screen_message_id", None)
+        context.user_data.pop("last_completed_screen_id", None)
+        context.user_data.pop("pending_screen_message_id", None)
         for name in (
             "operation_inputs",
             "flight_navigation",
@@ -291,14 +314,7 @@ async def dispatch_screen(update, context, handler):
             "screen_back",
         ):
             context.user_data.pop(name, None)
-    elif not query and text in {
-        "GROUND STATUS",
-        "SKED",
-        "OPS BRIEF",
-        "FLEET DOCS",
-        "ANALYTICS",
-        "CHARTER CHECK",
-    }:
+    elif not query and text in HOME_ACTIONS:
         previous = context.user_data.get("main_screen_pages")
         if previous:
             # Only one previous screen, in memory. Not a chat history.
@@ -318,4 +334,38 @@ async def dispatch_screen(update, context, handler):
     screen = MainScreen(update, context)
     if restarting:
         await screen.install_keyboard()
+    elif not query and text in HOME_ACTIONS:
+        # Reply keyboard sends a real chat message. Remove only these six
+        # service commands; leave ordinary user input and slash commands alone.
+        try:
+            await context.bot.delete_message(
+                chat_id=screen.chat_id, message_id=update.effective_message.message_id
+            )
+        except (AttributeError, TelegramError):
+            pass
+
+        # A new message puts the active work below the old, still readable
+        # result. Keep the previous completed screen until a result is rendered.
+        lock = _write_locks.setdefault((screen.chat_id, screen.user_id), asyncio.Lock())
+        async with lock:
+            if screen.generation != context.user_data.get("screen_generation", 0):
+                return
+            previous_pending = context.user_data.pop("pending_screen_message_id", None)
+            if previous_pending:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=screen.chat_id, message_id=previous_pending
+                    )
+                except TelegramError:
+                    pass
+            if context.user_data.get("main_screen_message_id") is None:
+                await screen.install_keyboard()
+            status = await context.bot.send_message(
+                chat_id=screen.chat_id,
+                text=f"{text} · Обработка запроса…",
+                disable_notification=True,
+            )
+            context.user_data["pending_screen_message_id"] = status.message_id
+            context.user_data["main_screen_message_id"] = status.message_id
+            screen.message_id = status.message_id
     return await handler(ScreenUpdate(update, screen), context)

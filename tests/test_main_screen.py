@@ -35,6 +35,7 @@ def screen_context(monkeypatch):
             edit_message_text=AsyncMock(return_value=SimpleNamespace(message_id=102)),
             send_chat_action=AsyncMock(),
             delete_my_commands=AsyncMock(),
+            delete_message=AsyncMock(),
         ),
     )
 
@@ -68,8 +69,9 @@ async def test_start_installs_keyboard_then_one_editable_screen(screen_context):
     )
     screen_id = ctx.user_data["main_screen_message_id"]
     await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
-    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] == screen_id
-    assert ctx.bot.send_message.await_count == 2
+    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] != screen_id
+    assert ctx.bot.send_message.await_count == 3
+    assert ctx.bot.delete_message.await_count >= 1
 
 
 @pytest.mark.asyncio
@@ -90,7 +92,7 @@ async def test_all_home_actions_share_screen_without_inline_menu(screen_context)
             for row in markup.inline_keyboard
             for button in row
         )
-    assert ctx.bot.send_message.await_count == 2
+    assert ctx.bot.send_message.await_count == 7
 
 
 @pytest.mark.asyncio
@@ -128,7 +130,9 @@ async def test_schedule_keeps_previous_context_until_data_arrives(
     before = ctx.bot.edit_message_text.await_count
 
     async def schedule(*args):
+        # Old data is still visible; a separate processing message was sent.
         assert ctx.bot.edit_message_text.await_count == before
+        assert ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
         return {"flights": [], "complete": True}
 
     monkeypatch.setattr(flight_browser, "get_flight_schedule", schedule)
@@ -365,3 +369,66 @@ async def test_denied_requests_do_not_create_screen(screen_context, monkeypatch)
     await bot.screen_message_handler(update_for("FLEET DOCS"), screen_context)
     screen_context.bot.send_message.assert_not_awaited()
     assert "main_screen_message_id" not in screen_context.user_data
+
+
+@pytest.mark.asyncio
+async def test_home_command_deleted_and_old_content_survives_processing(
+    screen_context, monkeypatch
+):
+    ctx = screen_context
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
+    old_screen = ctx.user_data["main_screen_message_id"]
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args):
+        entered.set()
+        await release.wait()
+        return {"flights": [], "complete": True}
+
+    monkeypatch.setattr(flight_browser, "get_flight_schedule", slow)
+    event = update_for("SKED")
+    event.effective_message.message_id = 42
+    task = asyncio.create_task(bot.screen_message_handler(event, ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        assert ctx.user_data["last_completed_screen_id"] == old_screen
+        assert not any(
+            call.kwargs.get("message_id") == old_screen
+            for call in ctx.bot.delete_message.await_args_list
+        )
+        assert any(
+            call.kwargs.get("message_id") == 42
+            for call in ctx.bot.delete_message.await_args_list
+        )
+    finally:
+        release.set()
+        await task
+    assert any(
+        call.kwargs.get("message_id") == old_screen
+        for call in ctx.bot.delete_message.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_loading_never_replaces_latest_selection(screen_context, monkeypatch):
+    ctx = screen_context
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args):
+        entered.set()
+        await release.wait()
+        return {"flights": [], "complete": True}
+
+    monkeypatch.setattr(flight_browser, "get_flight_schedule", slow)
+    first = asyncio.create_task(bot.screen_message_handler(update_for("SKED"), ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
+        latest = ctx.user_data["main_screen_message_id"]
+        assert "FLEET DOCS" in ctx.bot.edit_message_text.call_args.kwargs["text"]
+    finally:
+        release.set()
+        await first
+    assert ctx.user_data["main_screen_message_id"] == latest
+    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] == latest
