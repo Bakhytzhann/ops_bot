@@ -91,7 +91,7 @@ async def test_all_home_actions_share_screen_without_inline_menu(screen_context)
             for row in markup.inline_keyboard
             for button in row
         )
-    assert ctx.bot.send_message.await_count == 7
+    assert ctx.bot.send_message.await_count == 6
 
 
 @pytest.mark.asyncio

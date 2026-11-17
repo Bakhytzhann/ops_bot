@@ -60,6 +60,7 @@ class MainScreen:
             disable_notification=True,
         )
         self.keyboard_installed = True
+        self.context.user_data["home_keyboard_installed"] = True
 
     async def render(self, text, **kwargs):
         text = text.strip() or "Источник не предоставил результат."
@@ -181,7 +182,7 @@ class MainScreen:
                         )
                     ):
                         raise
-            elif not self.keyboard_installed:
+            elif not self.context.user_data.get("home_keyboard_installed"):
                 await self.install_keyboard()
             message = await bot.send_message(chat_id=self.chat_id, text=text, **kwargs)
             self.message_id = message.message_id
@@ -358,7 +359,7 @@ async def dispatch_screen(update, context, handler):
                     )
                 except TelegramError:
                     pass
-            if context.user_data.get("main_screen_message_id") is None:
+            if not context.user_data.get("home_keyboard_installed"):
                 await screen.install_keyboard()
             status = await context.bot.send_message(
                 chat_id=screen.chat_id,
