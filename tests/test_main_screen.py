@@ -69,7 +69,10 @@ async def test_start_installs_keyboard_then_one_editable_screen(screen_context):
     )
     assert "main_screen_message_id" not in ctx.user_data
     await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
-    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] == ctx.user_data["main_screen_message_id"]
+    assert (
+        ctx.bot.edit_message_text.call_args.kwargs["message_id"]
+        == ctx.user_data["main_screen_message_id"]
+    )
     assert ctx.bot.send_message.await_count == 2
 
 
@@ -131,7 +134,9 @@ async def test_schedule_keeps_previous_context_until_data_arrives(
     async def schedule(*args):
         # Old data is still visible; a separate processing message was sent.
         assert ctx.bot.edit_message_text.await_count == before
-        assert ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        assert (
+            ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        )
         return {"flights": [], "complete": True}
 
     monkeypatch.setattr(flight_browser, "get_flight_schedule", schedule)
@@ -394,7 +399,9 @@ async def test_home_command_deleted_and_old_content_survives_processing(
     task = asyncio.create_task(bot.screen_message_handler(event, ctx))
     try:
         await asyncio.wait_for(entered.wait(), 1)
-        assert ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        assert (
+            ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        )
         assert ctx.user_data["last_completed_screen_id"] == old_screen
         assert not any(
             call.kwargs.get("message_id") == old_screen
@@ -414,7 +421,9 @@ async def test_home_command_deleted_and_old_content_survives_processing(
 
 
 @pytest.mark.asyncio
-async def test_stale_loading_never_replaces_latest_selection(screen_context, monkeypatch):
+async def test_stale_loading_never_replaces_latest_selection(
+    screen_context, monkeypatch
+):
     ctx = screen_context
     entered, release = asyncio.Event(), asyncio.Event()
 
