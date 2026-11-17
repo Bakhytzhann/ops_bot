@@ -53,7 +53,7 @@ class MainScreen:
         # keyboard in Telegram clients. The editable screen is a separate message.
         await self.context.bot.send_message(
             chat_id=self.chat_id,
-            text="OPS Bot · разделы доступны на клавиатуре под полем ввода.",
+            text="OPS Bot",
             reply_markup=home_keyboard(),
             disable_notification=True,
         )

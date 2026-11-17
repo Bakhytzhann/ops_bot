@@ -280,10 +280,9 @@ async def _handle_message(update, context):
             await message.reply_text("Ввод отменён.")
         elif command and command[0] == "help":
             await message.reply_text(help_text())
-        else:
-            await message.reply_text(
-                "OPS Bot · используйте шесть кнопок под полем ввода."
-            )
+        elif command and command[0] == "menu":
+            await message.reply_text("Выберите раздел на клавиатуре.")
+        # /start only installs the persistent keyboard; no duplicate reply.
         return
     if command:
         action, arguments = command
