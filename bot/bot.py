@@ -31,6 +31,7 @@ from bot.commands import (
     help_text,
 )
 from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
+from bot.ground_status import GROUND_MARKUP, handle_ground_message, status_text
 from bot.flight_browser import (
     handle_selection,
     invalidate_screen,
@@ -94,6 +95,8 @@ def accepts_message(update, context):
             or message.text.strip() in HOME_PLACEHOLDERS
             or message.text.strip() == "FLEET DOCS"
             or pending_reply(update, context)
+            or bool(context.user_data.get("ground_flight"))
+            or bool(context.user_data.get("ground_selecting"))
         )
     )
 
@@ -135,6 +138,9 @@ async def handle_button(update, context):
             "Доступ разрешён только в личном чате для авторизованных пользователей.",
             show_alert=True,
         )
+        return
+    if query.data == "ground:link":
+        await query.answer("Функция ссылки ещё не реализована.", show_alert=True)
         return
     if (query.data or "").startswith("docs:"):
         category = query.data.removeprefix("docs:")
@@ -253,6 +259,19 @@ async def _handle_message(update, context):
         return
     command = parsed_command(message.text)
     text = message.text.strip()
+    if text == "GROUND STATUS":
+        context.user_data.pop("ground_flight", None)
+        context.user_data["ground_selecting"] = True
+        await message.reply_text(
+            "GROUND STATUS · Введите номер рейса или регистрацию ВС. "
+            "Затем отправляйте события свободным текстом: «колодки 1235», "
+            "«заправку закончили», «салон готов».",
+            reply_markup=GROUND_MARKUP,
+        )
+        return
+    if text in (HOME_PLACEHOLDERS - {"GROUND STATUS",}) | {"FLEET DOCS", SCHEDULE_BUTTON} or command:
+        context.user_data.pop("ground_flight", None)
+        context.user_data.pop("ground_selecting", None)
     if text == SCHEDULE_BUTTON or (command and command[0] in {"week", "sked"}):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
@@ -283,6 +302,9 @@ async def _handle_message(update, context):
         elif command and command[0] == "menu":
             await message.reply_text("Выберите раздел на клавиатуре.")
         # /start only installs the persistent keyboard; no duplicate reply.
+        return
+    if not command and (context.user_data.get("ground_flight") or context.user_data.get("ground_selecting")):
+        await handle_ground_message(update, context)
         return
     if command:
         action, arguments = command
