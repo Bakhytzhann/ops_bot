@@ -147,6 +147,9 @@ def fleet_page(token, state, page=0):
             )
         ]
     )
+    rows.append(
+        [InlineKeyboardButton("🧮 Расчёт чартера · E35L DEMO", callback_data="quote:menu:0")]
+    )
     return "\n".join(lines).strip(), InlineKeyboardMarkup(rows)
 
 
@@ -277,6 +280,12 @@ async def charter_callback(update, context):
                     InlineKeyboardButton(
                         "↻ Обновить Leon",
                         callback_data=f"char:{state['token']}:refresh:0",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🧮 Расчёт чартера · E35L DEMO",
+                        callback_data="quote:menu:0",
                     )
                 ],
             ]

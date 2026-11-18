@@ -26,6 +26,7 @@ from bot.admission import (
     show_access,
 )
 from bot.charter_check import charter_callback, show_charter
+from bot.charter_quote import quote_callback
 from bot.commands import (
     COMMANDS,
     execute_command,
@@ -139,6 +140,9 @@ async def handle_button(update, context):
             "Доступ разрешён только в личном чате для авторизованных пользователей.",
             show_alert=True,
         )
+        return
+    if (query.data or "").startswith("quote:"):
+        await quote_callback(update, context)
         return
     if (query.data or "").startswith("char:"):
         await charter_callback(update, context)
