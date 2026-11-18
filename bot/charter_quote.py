@@ -127,7 +127,8 @@ def menu():
 
 def quote_view(state):
     data = estimate(**state)
-    money = lambda number: f"${number:,.0f}"
+    def money(number):
+        return f"${number:,.0f}"
     text = [
         "CHARTER CHECK · E35L · ДЕМО-РАСЧЁТ",
         f"UAAA → {data['icao']} ({data['city']})",
