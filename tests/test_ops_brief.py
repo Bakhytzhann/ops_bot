@@ -38,21 +38,18 @@ def test_brief_has_scheduled_airport_and_next_flight():
             ),
         ]
     }
-    item = build_fleet(
-        schedule, datetime(2026, 11, 18, 12, tzinfo=UTC)
-    )[0]
+    item = build_fleet(schedule, datetime(2026, 11, 18, 12, tzinfo=UTC))[0]
     assert ops_brief.station_for_aircraft(item) == "UACC"
     assert "плановое прибытие" in ops_brief.status_lines(item)[0]
     assert "не подтверждены" in ops_brief.status_lines(item)[1]
     assert "ABC2" in ops_brief.next_flight_lines(item)[0]
-    active = build_fleet(
-        schedule, datetime(2026, 11, 18, 8, tzinfo=UTC)
-    )[0]
+    active = build_fleet(schedule, datetime(2026, 11, 18, 8, tzinfo=UTC))[0]
     assert ops_brief.station_for_aircraft(active) is None
 
 
 def test_notes_are_time_bound_and_verified_separately():
     now = datetime(2026, 11, 18, 12, tzinfo=UTC)
+
     def row(id, observed, pinned=0, status="active", verified_by=None):
         return {
             "id": id,
@@ -79,11 +76,7 @@ def test_notes_are_time_bound_and_verified_separately():
 async def test_ops_brief_button_shows_fleet(monkeypatch):
     now = datetime(2026, 11, 18, 12, tzinfo=UTC)
     sample = build_fleet(
-        {
-            "flights": [
-                flight(1, "2026-11-18T07:00:00Z", "2026-11-18T09:00:00Z")
-            ]
-        },
+        {"flights": [flight(1, "2026-11-18T07:00:00Z", "2026-11-18T09:00:00Z")]},
         now,
     )
     sample_note = {
@@ -126,9 +119,7 @@ async def test_notes_not_loaded_for_unbound_staff(monkeypatch):
         "get_flight_schedule",
         AsyncMock(
             return_value={
-                "flights": [
-                    flight(1, "2026-11-17T07:00:00Z", "2026-11-17T09:00:00Z")
-                ],
+                "flights": [flight(1, "2026-11-17T07:00:00Z", "2026-11-17T09:00:00Z")],
                 "complete": True,
             }
         ),
@@ -139,17 +130,13 @@ async def test_notes_not_loaded_for_unbound_staff(monkeypatch):
     state = await ops_brief.load_ops_brief(99)
     assert state["notes_access"] == "unbound"
     read.assert_not_awaited()
-    assert "нужна подтверждённая" in "\n".join(
-        ops_brief.notes_info(state, "UACC")
-    )
+    assert "нужна подтверждённая" in "\n".join(ops_brief.notes_info(state, "UACC"))
 
 
 @pytest.mark.asyncio
 async def test_stale_ops_brief_callback_rejected():
     ctx = SimpleNamespace(user_data={})
     update = update_for(None)
-    update.callback_query = SimpleNamespace(
-        data="opb:old:detail:0", answer=AsyncMock()
-    )
+    update.callback_query = SimpleNamespace(data="opb:old:detail:0", answer=AsyncMock())
     await bot.handle_button(update, ctx)
     assert update.callback_query.answer.call_args.kwargs["show_alert"] is True
