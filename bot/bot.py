@@ -27,6 +27,7 @@ from bot.admission import (
 )
 from bot.charter_check import charter_callback, show_charter
 from bot.charter_quote import quote_callback
+from bot.analytics import analytics_callback, show_analytics
 from bot.commands import (
     COMMANDS,
     execute_command,
@@ -95,7 +96,7 @@ def accepts_message(update, context):
             parsed_command(message.text)
             or message.text.strip() == SCHEDULE_BUTTON
             or message.text.strip() in HOME_PLACEHOLDERS
-            or message.text.strip() in {"FLEET DOCS", "GROUND STATUS", "CHARTER CHECK"}
+            or message.text.strip() in {"FLEET DOCS", "GROUND STATUS", "CHARTER CHECK", "ANALYTICS"}
             or pending_reply(update, context)
             or bool(context.user_data.get("ground_flight"))
             or bool(context.user_data.get("ground_selecting"))
@@ -140,6 +141,9 @@ async def handle_button(update, context):
             "Доступ разрешён только в личном чате для авторизованных пользователей.",
             show_alert=True,
         )
+        return
+    if (query.data or "").startswith("ana:"):
+        await analytics_callback(update, context)
         return
     if (query.data or "").startswith("quote:"):
         await quote_callback(update, context)
@@ -267,6 +271,11 @@ async def _handle_message(update, context):
         return
     command = parsed_command(message.text)
     text = message.text.strip()
+    if text == "ANALYTICS":
+        context.user_data.pop("ground_flight", None)
+        context.user_data.pop("ground_selecting", None)
+        await show_analytics(update, context)
+        return
     if text == "CHARTER CHECK":
         context.user_data.pop("ground_flight", None)
         context.user_data.pop("ground_selecting", None)
