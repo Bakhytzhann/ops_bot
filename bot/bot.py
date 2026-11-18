@@ -46,8 +46,8 @@ from bot.keyboards import (
     SCHEDULE_BUTTON,
 )
 from bot.main_screen import dispatch_screen
-from bot.ops_brief import ops_brief_callback, show_ops_brief
 from bot.message_edits import edit_message_text
+from bot.ops_brief import ops_brief_callback, show_ops_brief
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
 
