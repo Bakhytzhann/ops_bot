@@ -11,7 +11,6 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ollama import AsyncClient
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config.settings import settings
@@ -151,6 +150,8 @@ def validate_events(payload, original):
 
 async def extract_events(text):
     """Use Qwen strictly as a typed extractor, not as the source of truth."""
+    from ollama import AsyncClient
+
     client = AsyncClient(host=settings.ollama_host)
     system = (
         "Extract ONLY explicitly reported ground-handling events from the user message. "
