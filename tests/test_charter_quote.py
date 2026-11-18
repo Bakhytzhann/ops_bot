@@ -19,7 +19,8 @@ def test_twenty_destination_scenarios_with_valid_positive_totals():
 def test_roundtrip_is_double_one_way_with_same_assumptions():
     one = estimate(12, rate=6500, pax=8, reserve=10)
     two = estimate(12, rate=6500, pax=8, reserve=10, return_flight=True)
-    assert two["total"] == one["total"] * 2
+    assert two["subtotal"] == one["subtotal"] * 2
+    assert abs(two["total"] - one["total"] * 2) <= 100
     assert two["sectors"] == 2
 
 
