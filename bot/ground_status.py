@@ -8,6 +8,7 @@ import asyncio
 import json
 import re
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -71,33 +72,32 @@ class GroundStore:
     def record(self, user_id, flight_ref, telegram_message_id, raw_text, events):
         """Append events with the original message; repeated Telegram updates are idempotent."""
         received = datetime.now(UTC).isoformat()
-        with self._connect() as conn:
-            with conn:
-                cur = conn.execute(
-                    "INSERT OR IGNORE INTO ground_messages "
-                    "(user_id,flight_ref,message_id,received_at,raw_text) VALUES(?,?,?,?,?)",
-                    (user_id, flight_ref, telegram_message_id, received, raw_text),
+        with closing(self._connect()) as conn, conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO ground_messages "
+                "(user_id,flight_ref,message_id,received_at,raw_text) VALUES(?,?,?,?,?)",
+                (user_id, flight_ref, telegram_message_id, received, raw_text),
+            )
+            if not cur.rowcount:
+                return False
+            for event in events:
+                conn.execute(
+                    "INSERT INTO ground_events "
+                    "(message_id,event_type,event_time,value,evidence,recorded_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (
+                        cur.lastrowid,
+                        event["type"],
+                        event.get("time"),
+                        event.get("value"),
+                        event["evidence"],
+                        received,
+                    ),
                 )
-                if not cur.rowcount:
-                    return False
-                for event in events:
-                    conn.execute(
-                        "INSERT INTO ground_events "
-                        "(message_id,event_type,event_time,value,evidence,recorded_at) "
-                        "VALUES(?,?,?,?,?,?)",
-                        (
-                            cur.lastrowid,
-                            event["type"],
-                            event.get("time"),
-                            event.get("value"),
-                            event["evidence"],
-                            received,
-                        ),
-                    )
         return True
 
     def events(self, user_id, flight_ref, limit=120):
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             return [
                 dict(row)
                 for row in conn.execute(
@@ -116,7 +116,7 @@ ground_store = GroundStore()
 def validate_events(payload, original):
     """Accept only supported types with evidence copied from the actual message."""
     if not isinstance(payload, dict) or not isinstance(payload.get("events"), list):
-        raise ValueError("Qwen не вернул структурированные события.")
+        raise TypeError("Qwen не вернул структурированные события.")
     if len(payload["events"]) > 12:
         raise ValueError("Слишком много событий для одного сообщения.")
     result = []
@@ -223,7 +223,7 @@ async def handle_ground_message(update, context):
         return
     try:
         events = await extract_events(text)
-    except (TimeoutError, ConnectionError, ValueError, OSError):
+    except (TimeoutError, ConnectionError, ValueError, TypeError, OSError):
         await update.effective_message.reply_text(
             "Не удалось распознать сообщение через Qwen. Данные не сохранены. Повторите запрос."
         )

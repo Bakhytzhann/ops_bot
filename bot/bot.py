@@ -31,13 +31,13 @@ from bot.commands import (
     help_text,
 )
 from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
-from bot.ground_status import GROUND_MARKUP, handle_ground_message, status_text
 from bot.flight_browser import (
     handle_selection,
     invalidate_screen,
     is_card_notice_callback,
     show_week,
 )
+from bot.ground_status import GROUND_MARKUP, handle_ground_message
 from bot.keyboards import (
     HOME_PLACEHOLDERS,
     SCHEDULE_BUTTON,
