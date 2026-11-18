@@ -116,9 +116,7 @@ def aggregate(flights, now):
                 "arrival": arr,
                 "duration": block_minutes,
                 "ferry": (
-                    flight.get("ferry")
-                    if type(flight.get("ferry")) is bool
-                    else None
+                    flight.get("ferry") if type(flight.get("ferry")) is bool else None
                 ),
             }
         )
@@ -282,7 +280,8 @@ async def load_analytics(period, *, now=None, loader=None):
             flights = [dict(f) if isinstance(f, dict) else f for f in result["flights"]]
             result = {**result, "flights": flights}
             missing = [
-                f for f in flights
+                f
+                for f in flights
                 if isinstance(f, dict) and type(f.get("ferry")) is not bool
             ]
             if loader is None and missing:
@@ -297,8 +296,7 @@ async def load_analytics(period, *, now=None, loader=None):
                         ids = {
                             f.get("flightNid")
                             for f in ferry_result["flights"]
-                            if isinstance(f, dict)
-                            and f.get("flightNid") is not None
+                            if isinstance(f, dict) and f.get("flightNid") is not None
                         }
                         for flight in missing:
                             if flight.get("flightNid") is not None:
@@ -343,11 +341,7 @@ def _top_lines(counter, *, unit="рейсов", limit=5):
 
 def _ferry_lines(result):
     known = result["ferry_count"] + result["nonferry_count"]
-    share = (
-        f"{result['ferry_count'] / known * 100:.1f}%"
-        if known
-        else "нет данных"
-    )
+    share = f"{result['ferry_count'] / known * 100:.1f}%" if known else "нет данных"
     return [
         f"Empty / ferry (Leon): {result['ferry_count']}",
         f"Не ferry (Leon): {result['nonferry_count']}",
@@ -457,8 +451,7 @@ def render_analytics(result, view):
                 "",
                 "Плановые empty / ferry:",
                 *_ferry_lines(result),
-                "Часы non-ferry: "
-                f"{minutes_label(result['nonferry_minutes'])}",
+                f"Часы non-ferry: {minutes_label(result['nonferry_minutes'])}",
                 "Это не подтверждённые расходы и не оплаченный налёт.",
                 "",
                 "Длительные промежутки между рейсами:",

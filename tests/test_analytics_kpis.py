@@ -21,16 +21,27 @@ def make(nid, dep, arr, origin, destination, *, ferry=None, tail="UP-AAA"):
 def summary():
     flights = [
         make(
-            1, "2026-11-11T08:00:00Z", "2026-11-11T10:00:00Z",
-            "UAAA", "UACC", ferry=False,
+            1,
+            "2026-11-11T08:00:00Z",
+            "2026-11-11T10:00:00Z",
+            "UAAA",
+            "UACC",
+            ferry=False,
         ),
         make(
-            2, "2026-11-13T12:00:00Z", "2026-11-13T13:00:00Z",
-            "UACC", "UAAA", ferry=True,
+            2,
+            "2026-11-13T12:00:00Z",
+            "2026-11-13T13:00:00Z",
+            "UACC",
+            "UAAA",
+            ferry=True,
         ),
         make(
-            3, "2026-11-14T12:00:00Z", "2026-11-14T13:00:00Z",
-            "UAAA", "UAII",
+            3,
+            "2026-11-14T12:00:00Z",
+            "2026-11-14T13:00:00Z",
+            "UAAA",
+            "UAII",
         ),
     ]
     data = aggregate(flights, datetime(2026, 11, 18, 12, tzinfo=UTC))
@@ -71,8 +82,11 @@ def test_all_departments_show_real_aviation_kpis():
 def test_unknown_ferry_remains_unknown():
     flights = [
         make(
-            1, "2026-11-11T08:00:00Z", "2026-11-11T10:00:00Z",
-            "UAAA", "UACC",
+            1,
+            "2026-11-11T08:00:00Z",
+            "2026-11-11T10:00:00Z",
+            "UAAA",
+            "UACC",
         )
     ]
     r = aggregate(flights, datetime(2026, 11, 18, tzinfo=UTC))
