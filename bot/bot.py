@@ -25,6 +25,7 @@ from bot.admission import (
     request_access,
     show_access,
 )
+from bot.charter_check import charter_callback, show_charter
 from bot.commands import (
     COMMANDS,
     execute_command,
@@ -93,7 +94,7 @@ def accepts_message(update, context):
             parsed_command(message.text)
             or message.text.strip() == SCHEDULE_BUTTON
             or message.text.strip() in HOME_PLACEHOLDERS
-            or message.text.strip() in {"FLEET DOCS", "GROUND STATUS"}
+            or message.text.strip() in {"FLEET DOCS", "GROUND STATUS", "CHARTER CHECK"}
             or pending_reply(update, context)
             or bool(context.user_data.get("ground_flight"))
             or bool(context.user_data.get("ground_selecting"))
@@ -138,6 +139,9 @@ async def handle_button(update, context):
             "Доступ разрешён только в личном чате для авторизованных пользователей.",
             show_alert=True,
         )
+        return
+    if (query.data or "").startswith("char:"):
+        await charter_callback(update, context)
         return
     if query.data == "ground:link":
         await query.answer("Функция ссылки ещё не реализована.", show_alert=True)
@@ -259,6 +263,11 @@ async def _handle_message(update, context):
         return
     command = parsed_command(message.text)
     text = message.text.strip()
+    if text == "CHARTER CHECK":
+        context.user_data.pop("ground_flight", None)
+        context.user_data.pop("ground_selecting", None)
+        await show_charter(update, context)
+        return
     if text == "GROUND STATUS":
         context.user_data.pop("ground_flight", None)
         context.user_data["ground_selecting"] = True
