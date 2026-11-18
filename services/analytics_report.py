@@ -341,6 +341,40 @@ def _top_lines(counter, *, unit="рейсов", limit=5):
     return [f"• {key}: {value} {unit}" for key, value in ranked] or ["Нет данных."]
 
 
+def _ferry_lines(result):
+    known = result["ferry_count"] + result["nonferry_count"]
+    share = (
+        f"{result['ferry_count'] / known * 100:.1f}%"
+        if known
+        else "нет данных"
+    )
+    return [
+        f"Empty / ferry (Leon): {result['ferry_count']}",
+        f"Не ferry (Leon): {result['nonferry_count']}",
+        f"Без классификации: {result['unknown_ferry']}",
+        f"Доля ferry среди классифицированных: {share}",
+        f"Плановые часы ferry: {minutes_label(result['ferry_minutes'])}",
+    ]
+
+
+def _idle_lines(result):
+    return [
+        f"Длительных промежутков между рейсами (≥24 ч): {len(result['idle'])}",
+        f"Их суммарная продолжительность: {minutes_label(result['idle_minutes'])}",
+        f"Из них ≥72 ч: {result['idle_72h']}",
+    ]
+
+
+def _tail_idle_lines(result):
+    entries = sorted(
+        result["idle_by_tail"].items(),
+        key=lambda row: (-row[1], row[0]),
+    )[:5]
+    return [f"• {tail}: {minutes_label(minutes)}" for tail, minutes in entries] or [
+        "Нет зарегистрированных промежутков ≥24 ч."
+    ]
+
+
 def render_analytics(result, view):
     if view not in VIEWS:
         raise ValueError("Неизвестный раздел аналитики.")
@@ -368,6 +402,12 @@ def render_analytics(result, view):
                 f"Плановое время рейсов: {minutes_label(result['minutes'])}",
                 f"Без назначенного борта: {result['unassigned']}",
                 "",
+                "Структура рейсов:",
+                *_ferry_lines(result),
+                "",
+                "Простои между плановыми рейсами:",
+                *_idle_lines(result),
+                "",
                 "Наиболее загруженные борта (плановые рейсы):",
                 *_top_lines(result["tails"]),
                 "",
@@ -386,6 +426,14 @@ def render_analytics(result, view):
                 f"Уникальных маршрутов: {len(result['routes'])}",
                 f"Уникальных аэропортов назначения: {len(result['destinations'])}",
                 "",
+                "Структура перевозок:",
+                *_ferry_lines(result),
+                "Ferry — не подтверждённый доходный рейс.",
+                "Категория «не ferry» также не гарантирует коммерческий рейс.",
+                "",
+                "Маршруты empty / ferry:",
+                *_top_lines(result["ferry_routes"]),
+                "",
                 "Популярные направления:",
                 *_top_lines(result["destinations"]),
                 "",
@@ -403,6 +451,15 @@ def render_analytics(result, view):
                 f"Суммарное плановое время: {minutes_label(result['minutes'])}",
                 f"Рейсов без расчётного времени: "
                 f"{result['legs'] - result['known_durations']}",
+                "",
+                "Плановые empty / ferry:",
+                *_ferry_lines(result),
+                "Часы non-ferry: "
+                f"{minutes_label(result['nonferry_minutes'])}",
+                "Это не подтверждённые расходы и не оплаченный налёт.",
+                "",
+                "Длительные промежутки между рейсами:",
+                *_idle_lines(result),
                 "",
                 "Лётная нагрузка по бортам (плановые часы):",
                 *(
@@ -436,6 +493,11 @@ def render_analytics(result, view):
                 f"Несовпадений аэропортов между рейсами ВС: "
                 f"{len(result['position_mismatches'])}",
                 "",
+                "Длительные интервалы / простои (план):",
+                *_idle_lines(result),
+                "По бортам:",
+                *_tail_idle_lines(result),
+                "",
                 "Короткие интервалы между рейсами (план):",
                 *(
                     [
@@ -457,6 +519,15 @@ def render_analytics(result, view):
                 "Порог 120 мин — аналитический фильтр, не норматив turnaround.",
             ]
         )
+    lines.extend(
+        [
+            "",
+            "Простой = только подтверждённый парой последовательных плановых "
+            "рейсов интервал на одном аэродроме; не фактический downtime.",
+            "Не учитываются периоды до первого и после последнего рейса, "
+            "а также ВС без рейсов в выборке.",
+        ]
+    )
     if result["excluded"]:
         lines.append(
             f"Пропущено {result['excluded']} записей без корректного прошедшего времени вылета."
