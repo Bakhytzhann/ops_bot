@@ -155,7 +155,11 @@ def aggregate(flights, now):
                 continue
             arrival_airport = previous["flight"].get("arrival")
             departure_airport = following["flight"].get("departure")
-            if not arrival_airport or not departure_airport or arrival_airport != departure_airport:
+            if (
+                not arrival_airport
+                or not departure_airport
+                or arrival_airport != departure_airport
+            ):
                 position_mismatches.append(reg)
                 continue
             delta = (following["departure"] - previous["arrival"]).total_seconds() / 60
@@ -217,9 +221,8 @@ async def load_analytics(period, *, now=None, loader=None):
                 result = await asyncio.wait_for(
                     source(first.isoformat(), last.isoformat()), timeout=60
                 )
-                if (
-                    not isinstance(result, dict)
-                    or not isinstance(result.get("flights"), list)
+                if not isinstance(result, dict) or not isinstance(
+                    result.get("flights"), list
                 ):
                     raise TypeError("Неправильный ответ Leon")
                 return result
@@ -236,8 +239,7 @@ async def load_analytics(period, *, now=None, loader=None):
         for flight in result["flights"]
     ]
     complete_windows = sum(
-        result is not None and result.get("complete") is True
-        for result in results
+        result is not None and result.get("complete") is True for result in results
     )
     available_windows = sum(result is not None for result in results)
     if available_windows == 0:
@@ -293,7 +295,8 @@ def render_analytics(result, view):
                 "",
                 "Количество рейсов по месяцам:",
                 *_top_lines(
-                    result["legs_by_month"], unit="рейсов",
+                    result["legs_by_month"],
+                    unit="рейсов",
                     limit=12,
                 ),
             ]

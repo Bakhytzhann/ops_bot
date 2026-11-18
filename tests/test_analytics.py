@@ -49,16 +49,22 @@ def test_period_month_rollover():
 
 def test_planned_timing_aggregation_and_turns():
     now = datetime(2026, 11, 18, 20, tzinfo=UTC)
-    a = make_flight(
-        10, "UP-AAA", "2026-11-18T08:00:00Z", "2026-11-18T10:00:00Z"
-    )
+    a = make_flight(10, "UP-AAA", "2026-11-18T08:00:00Z", "2026-11-18T10:00:00Z")
     b = make_flight(
-        11, "UP-AAA", "2026-11-18T11:30:00Z", "2026-11-18T13:00:00Z",
-        "UACC", "UAAA",
+        11,
+        "UP-AAA",
+        "2026-11-18T11:30:00Z",
+        "2026-11-18T13:00:00Z",
+        "UACC",
+        "UAAA",
     )
     c = make_flight(
-        12, "UP-AAA", "2026-11-18T15:00:00Z", "2026-11-18T16:00:00Z",
-        "UGTB", "UAAA",
+        12,
+        "UP-AAA",
+        "2026-11-18T15:00:00Z",
+        "2026-11-18T16:00:00Z",
+        "UGTB",
+        "UAAA",
     )
     summary = aggregate([a, a, b, c], now)
     assert summary["legs"] == 3
@@ -70,11 +76,12 @@ def test_planned_timing_aggregation_and_turns():
 
 def test_finance_report_does_not_invent_earnings_or_crash():
     now = datetime(2026, 11, 18, 20, tzinfo=UTC)
-    summary = aggregate([
-        make_flight(
-            10, "UP-AAA", "2026-11-18T08:00:00Z", "2026-11-18T10:00:00Z"
-        ),
-    ], now)
+    summary = aggregate(
+        [
+            make_flight(10, "UP-AAA", "2026-11-18T08:00:00Z", "2026-11-18T10:00:00Z"),
+        ],
+        now,
+    )
     result = {
         **summary,
         "period": "7d",
@@ -98,6 +105,7 @@ async def test_partial_leon_windows_explicit():
         if first == "2026-11-12":
             return {"flights": [], "complete": False}
         return {"flights": [], "complete": True}
+
     result = await load_analytics(
         "7d", now=datetime(2026, 11, 18, 10, tzinfo=UTC), loader=source
     )

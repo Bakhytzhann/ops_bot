@@ -79,15 +79,10 @@ async def analytics_callback(update, context):
         or parts[2] not in {"period", "view", "refresh"}
         or not state
         or parts[1] != state["token"]
-        or (
-            parts[2] in {"period", "refresh"}
-            and parts[3] not in PERIODS
-        )
+        or (parts[2] in {"period", "refresh"} and parts[3] not in PERIODS)
         or (parts[2] == "view" and parts[3] not in VIEWS)
     ):
-        await query.answer(
-            "Раздел устарел. Откройте ANALYTICS снова.", show_alert=True
-        )
+        await query.answer("Раздел устарел. Откройте ANALYTICS снова.", show_alert=True)
         return
 
     action, value = parts[2:]
@@ -138,7 +133,5 @@ async def analytics_callback(update, context):
         return
     await query.edit_message_text(
         render_analytics(data, state["view"]),
-        reply_markup=_keyboard(
-            state["token"], period=period, view=state["view"]
-        ),
+        reply_markup=_keyboard(state["token"], period=period, view=state["view"]),
     )
