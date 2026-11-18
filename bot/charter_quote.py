@@ -119,9 +119,7 @@ def menu():
                 for j in range(index, min(index + 2, len(DEMO_ROUTES)))
             ]
         )
-    rows.append(
-        [InlineKeyboardButton("← К флоту", callback_data="quote:fleet:0")]
-    )
+    rows.append([InlineKeyboardButton("← К флоту", callback_data="quote:fleet:0")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
@@ -129,6 +127,7 @@ def quote_view(state):
     data = estimate(**state)
     def money(number):
         return f"${number:,.0f}"
+
     text = [
         "CHARTER CHECK · E35L · ДЕМО-РАСЧЁТ",
         f"UAAA → {data['icao']} ({data['city']})",
@@ -153,9 +152,7 @@ def quote_view(state):
         "Тарифы аэропортов, ATC и handling не подтверждены.",
     ]
     if data["range_warning"]:
-        text.extend(
-            ["ПРЕДУПРЕЖДЕНИЕ: нужна отдельная проверка дальности и посадок."]
-        )
+        text.extend(["ПРЕДУПРЕЖДЕНИЕ: нужна отдельная проверка дальности и посадок."])
     rows = [
         [
             InlineKeyboardButton(
@@ -189,12 +186,8 @@ def quote_view(state):
             for pct in (0, 10, 20)
         ],
         [
-            InlineKeyboardButton(
-                "← 20 маршрутов", callback_data="quote:menu:0"
-            ),
-            InlineKeyboardButton(
-                "← Флот", callback_data="quote:fleet:0"
-            ),
+            InlineKeyboardButton("← 20 маршрутов", callback_data="quote:menu:0"),
+            InlineKeyboardButton("← Флот", callback_data="quote:fleet:0"),
         ],
     ]
     return "\n".join(text), InlineKeyboardMarkup(rows)
