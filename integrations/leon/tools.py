@@ -58,6 +58,7 @@ def make_flight_search_arguments(
     start: datetime,
     end: datetime,
     offset: int,
+    ferry: bool | None = None,
 ):
     return {
         "timeRange": {
@@ -77,7 +78,7 @@ def make_flight_search_arguments(
         "tagNidList": None,
         "aircraftNidList": None,
         "crewNidList": None,
-        "ferry": None,
+        "ferry": ferry,
         "cancelled": None,
         "departureCountry": None,
         "arrivalCountry": None,
@@ -86,7 +87,9 @@ def make_flight_search_arguments(
     }
 
 
-async def get_flight_schedule(date: str, end_date: str | None = None) -> dict:
+async def get_flight_schedule(
+    date: str, end_date: str | None = None, *, ferry: bool | None = None
+) -> dict:
 
     day = datetime.strptime(date, "%Y-%m-%d").date()
     last_day = datetime.strptime(end_date or date, "%Y-%m-%d").date()
@@ -113,6 +116,7 @@ async def get_flight_schedule(date: str, end_date: str | None = None) -> dict:
             start,
             end,
             offset=offset,
+            ferry=ferry,
         )
 
         data = await call_leon(
@@ -153,6 +157,15 @@ async def get_flight_schedule(date: str, end_date: str | None = None) -> dict:
                     or flight.get("icaoType"),
                     "status": flight.get("status"),
                     "cancelled": flight.get("isCnl"),
+                    "ferry": (
+                        ferry
+                        if type(ferry) is bool
+                        else flight.get("isFerry")
+                        if type(flight.get("isFerry")) is bool
+                        else flight.get("ferry")
+                        if type(flight.get("ferry")) is bool
+                        else None
+                    ),
                 }
             )
 

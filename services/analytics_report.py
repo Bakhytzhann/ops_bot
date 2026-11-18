@@ -27,6 +27,8 @@ VIEWS = {
     "timings": "Тайминги",
 }
 TIGHT_TURN_MINUTES = 120  # Descriptive dashboard threshold, not a legal minimum.
+IDLE_MINUTES = 24 * 60  # Long between-flight schedule gap, not verified downtime.
+LONG_IDLE_MINUTES = 72 * 60
 
 
 def period_start(key, today):
@@ -113,6 +115,11 @@ def aggregate(flights, now):
                 "departure": dep,
                 "arrival": arr,
                 "duration": block_minutes,
+                "ferry": (
+                    flight.get("ferry")
+                    if type(flight.get("ferry")) is bool
+                    else None
+                ),
             }
         )
 
@@ -125,12 +132,30 @@ def aggregate(flights, now):
     departures = Counter()
     durations = []
     by_tail = defaultdict(list)
+    ferry_count = 0
+    other_count = 0
+    unknown_ferry = 0
+    ferry_minutes = 0
+    nonferry_minutes = 0
+    ferry_missing_duration = 0
+    ferry_routes = Counter()
+    status_counts = Counter()
     for item in valid:
         flight, reg = item["flight"], item["reg"]
+        status_counts[str(flight.get("status") or "UNKNOWN").upper()] += 1
+        if item["ferry"] is True:
+            ferry_count += 1
+        elif item["ferry"] is False:
+            other_count += 1
+        else:
+            unknown_ferry += 1
         depart_code = flight.get("departure")
         arrival_code = flight.get("arrival")
         if depart_code and arrival_code:
-            routes[f"{depart_code} → {arrival_code}"] += 1
+            route = f"{depart_code} → {arrival_code}"
+            routes[route] += 1
+            if item["ferry"] is True:
+                ferry_routes[route] += 1
         if arrival_code:
             destinations[arrival_code] += 1
         if reg:
@@ -140,7 +165,14 @@ def aggregate(flights, now):
         legs_by_month[month] += 1
         departures[item["departure"].hour // 6] += 1
         if item["duration"] is not None:
+            if item["ferry"] is True:
+                ferry_minutes += item["duration"]
+            elif item["ferry"] is False:
+                nonferry_minutes += item["duration"]
             durations.append(item["duration"])
+        elif item["ferry"] is True:
+            ferry_missing_duration += 1
+        if item["duration"] is not None:
             hours_by_month[month] += item["duration"]
             if reg:
                 hours_by_tail[reg] += item["duration"]
@@ -174,6 +206,10 @@ def aggregate(flights, now):
             else:
                 turns.append(entry)
     turns.sort(key=lambda item: item["minutes"])
+    idle = [item for item in turns if item["minutes"] >= IDLE_MINUTES]
+    idle_by_tail = Counter()
+    for item in idle:
+        idle_by_tail[item["tail"]] += item["minutes"]
     longest = sorted(
         (item for item in valid if item["duration"] is not None),
         key=lambda item: item["duration"],
@@ -199,6 +235,18 @@ def aggregate(flights, now):
         "overlaps": overlaps,
         "position_mismatches": position_mismatches,
         "longest": longest,
+        "ferry_count": ferry_count,
+        "nonferry_count": other_count,
+        "unknown_ferry": unknown_ferry,
+        "ferry_minutes": ferry_minutes,
+        "nonferry_minutes": nonferry_minutes,
+        "ferry_missing_duration": ferry_missing_duration,
+        "ferry_routes": ferry_routes,
+        "status_counts": status_counts,
+        "idle": idle,
+        "idle_minutes": sum(item["minutes"] for item in idle),
+        "idle_72h": sum(item["minutes"] >= LONG_IDLE_MINUTES for item in idle),
+        "idle_by_tail": idle_by_tail,
     }
 
 
@@ -225,9 +273,39 @@ async def load_analytics(period, *, now=None, loader=None):
                     result.get("flights"), list
                 ):
                     raise TypeError("Неправильный ответ Leon")
-                return result
             except Exception:  # noqa: BLE001 -- failed source window stays explicitly partial
                 return None
+
+            # Search returns a reliable ferry=True filtered subset, while the
+            # default normalized flight record may not include an empty flag.
+            # Do not call this additional endpoint for injected test sources.
+            flights = [dict(f) if isinstance(f, dict) else f for f in result["flights"]]
+            result = {**result, "flights": flights}
+            missing = [
+                f for f in flights
+                if isinstance(f, dict) and type(f.get("ferry")) is not bool
+            ]
+            if loader is None and missing:
+                try:
+                    ferry_result = await asyncio.wait_for(
+                        get_flight_schedule(
+                            first.isoformat(), last.isoformat(), ferry=True
+                        ),
+                        timeout=60,
+                    )
+                    if ferry_result.get("complete") is True:
+                        ids = {
+                            f.get("flightNid")
+                            for f in ferry_result["flights"]
+                            if isinstance(f, dict)
+                            and f.get("flightNid") is not None
+                        }
+                        for flight in missing:
+                            if flight.get("flightNid") is not None:
+                                flight["ferry"] = flight["flightNid"] in ids
+                except Exception:  # noqa: BLE001 -- preserve unknown classification
+                    pass
+            return result
 
     results = await asyncio.gather(
         *(get_window(first, last) for first, last in windows)
