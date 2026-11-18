@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from bot import charter_check
-from bot import bot
+from bot import bot, charter_check
 from tests.test_bot_commands import update_for
 
 

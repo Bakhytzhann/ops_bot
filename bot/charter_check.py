@@ -133,7 +133,7 @@ async def load_fleet():
     end = (now + timedelta(days=7)).date().isoformat()
     result = await asyncio.wait_for(get_flight_schedule(start, end), timeout=70)
     if not isinstance(result, dict) or not isinstance(result.get("flights"), list):
-        raise ValueError("Leon вернул некорректный формат расписания.")
+        raise TypeError("Leon вернул некорректный формат расписания.")
     return {
         "fleet": build_fleet(result, now),
         "complete": result.get("complete") is True,
