@@ -118,7 +118,7 @@ async def analytics_callback(update, context):
             f"ANALYTICS · {PERIODS[period]}\nЗагрузка Leon по интервалам до 31 дня…",
         )
         try:
-            data = await asyncio.wait_for(load_analytics(period), timeout=170)
+            data = await asyncio.wait_for(load_analytics(period), timeout=360)
         except (TimeoutError, ValueError, RuntimeError, OSError, TypeError):
             await query.edit_message_text(
                 "ANALYTICS · Данные Leon недоступны или не получены. "

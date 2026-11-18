@@ -25,9 +25,9 @@ from bot.admission import (
     request_access,
     show_access,
 )
+from bot.analytics import analytics_callback, show_analytics
 from bot.charter_check import charter_callback, show_charter
 from bot.charter_quote import quote_callback
-from bot.analytics import analytics_callback, show_analytics
 from bot.commands import (
     COMMANDS,
     execute_command,

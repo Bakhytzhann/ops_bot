@@ -147,10 +147,16 @@ def aggregate(flights, now):
 
     turns = []
     overlaps = []
+    position_mismatches = []
     for reg, legs in by_tail.items():
         legs.sort(key=lambda item: item["departure"])
         for previous, following in zip(legs, legs[1:]):
             if previous["arrival"] is None:
+                continue
+            arrival_airport = previous["flight"].get("arrival")
+            departure_airport = following["flight"].get("departure")
+            if not arrival_airport or not departure_airport or arrival_airport != departure_airport:
+                position_mismatches.append(reg)
                 continue
             delta = (following["departure"] - previous["arrival"]).total_seconds() / 60
             entry = {
@@ -187,6 +193,7 @@ def aggregate(flights, now):
         "departures": departures,
         "turns": turns,
         "overlaps": overlaps,
+        "position_mismatches": position_mismatches,
         "longest": longest,
     }
 
@@ -317,9 +324,15 @@ def render_analytics(result, view):
                 f"{result['legs'] - result['known_durations']}",
                 "",
                 "Лётная нагрузка по бортам (плановые часы):",
-                *_top_lines(
-                    {k: minutes_label(v) for k, v in result["hours_by_tail"].items()},
-                    unit="", limit=10,
+                *(
+                    [
+                        f"• {tail}: {minutes_label(total)}"
+                        for tail, total in sorted(
+                            result["hours_by_tail"].items(),
+                            key=lambda entry: (-entry[1], entry[0]),
+                        )[:10]
+                    ]
+                    or ["Нет данных."]
                 ),
                 "",
                 "Выручка, инвойсы, фактические расходы, прибыль и маржа:",
@@ -339,6 +352,8 @@ def render_analytics(result, view):
                 f"Интервалов до {TIGHT_TURN_MINUTES} мин: "
                 f"{sum(t['minutes'] < TIGHT_TURN_MINUTES for t in turns)}",
                 f"Перекрытий по расписанию: {len(result['overlaps'])}",
+                f"Несовпадений аэропортов между рейсами ВС: "
+                f"{len(result['position_mismatches'])}",
                 "",
                 "Короткие интервалы между рейсами (план):",
                 *(
