@@ -269,7 +269,7 @@ async def _handle_message(update, context):
             reply_markup=GROUND_MARKUP,
         )
         return
-    if text in (HOME_PLACEHOLDERS - {"GROUND STATUS",}) | {"FLEET DOCS", SCHEDULE_BUTTON} or command:
+    if text in HOME_PLACEHOLDERS | {"FLEET DOCS", SCHEDULE_BUTTON} or command:
         context.user_data.pop("ground_flight", None)
         context.user_data.pop("ground_selecting", None)
     if text == SCHEDULE_BUTTON or (command and command[0] in {"week", "sked"}):
@@ -303,7 +303,10 @@ async def _handle_message(update, context):
             await message.reply_text("Выберите раздел на клавиатуре.")
         # /start only installs the persistent keyboard; no duplicate reply.
         return
-    if not command and (context.user_data.get("ground_flight") or context.user_data.get("ground_selecting")):
+    if not command and (
+        context.user_data.get("ground_flight")
+        or context.user_data.get("ground_selecting")
+    ):
         await handle_ground_message(update, context)
         return
     if command:

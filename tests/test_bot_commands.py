@@ -178,9 +178,7 @@ def test_persistent_keyboard_has_six_actions():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "label", ["OPS BRIEF", "CHARTER CHECK", "ANALYTICS"]
-)
+@pytest.mark.parametrize("label", ["OPS BRIEF", "CHARTER CHECK", "ANALYTICS"])
 async def test_unimplemented_quick_actions_do_not_call_model_or_api(
     context, monkeypatch, label
 ):

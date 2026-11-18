@@ -130,7 +130,9 @@ def validate_events(payload, original):
         if evidence.casefold() not in original.casefold():
             continue
         time = item.get("time")
-        if time is not None and (not isinstance(time, str) or not TIME_RE.fullmatch(time)):
+        if time is not None and (
+            not isinstance(time, str) or not TIME_RE.fullmatch(time)
+        ):
             continue
         # An event's clock time must also appear explicitly, with or without colon.
         if time and time not in original and time.replace(":", "") not in original:
@@ -168,7 +170,10 @@ async def extract_events(text):
     response = await asyncio.wait_for(
         client.chat(
             model=settings.ollama_model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": text}],
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": text},
+            ],
             format="json",
             think=False,
             keep_alive=settings.ollama_keep_alive,
@@ -184,7 +189,11 @@ async def extract_events(text):
 
 
 def status_text(flight_ref, entries):
-    lines = [f"GROUND STATUS · {flight_ref}", "", "Последние зарегистрированные события:"]
+    lines = [
+        f"GROUND STATUS · {flight_ref}",
+        "",
+        "Последние зарегистрированные события:",
+    ]
     if not entries:
         lines.append("Событий пока нет.")
     else:
@@ -194,8 +203,11 @@ def status_text(flight_ref, entries):
             value = f" · {entry['value']}" if entry["value"] else ""
             lines.append(f"• {title}{tail}{value}")
     lines.extend(
-        ["", "Отправьте следующее событие обычным сообщением в этот чат.",
-         "Указанная сотрудником готовность не является разрешением на вылет."]
+        [
+            "",
+            "Отправьте следующее событие обычным сообщением в этот чат.",
+            "Указанная сотрудником готовность не является разрешением на вылет.",
+        ]
     )
     return "\n".join(lines)
 

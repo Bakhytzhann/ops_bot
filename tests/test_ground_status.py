@@ -15,25 +15,63 @@ def test_extract_validates_reported_facts_and_missing_times():
     events = validate_events(
         {
             "events": [
-                {"type": "CHOCKS_ON", "time": "12:35", "value": None, "evidence": "Колодки 1235"},
-                {"type": "STAND", "time": None, "value": "24", "evidence": "стоянка 24"},
-                {"type": "FUEL_COMPLETED", "time": None, "value": None, "evidence": "Заправку закончили"},
-                {"type": "CABIN_READY", "time": None, "value": None, "evidence": "салон готов"},
-                {"type": "REPORTED_READY", "time": None, "value": None, "evidence": "все готовы"},
-                {"type": "FUEL_STARTED", "time": "18:09", "value": None, "evidence": "Заправку закончили"},
+                {
+                    "type": "CHOCKS_ON",
+                    "time": "12:35",
+                    "value": None,
+                    "evidence": "Колодки 1235",
+                },
+                {
+                    "type": "STAND",
+                    "time": None,
+                    "value": "24",
+                    "evidence": "стоянка 24",
+                },
+                {
+                    "type": "FUEL_COMPLETED",
+                    "time": None,
+                    "value": None,
+                    "evidence": "Заправку закончили",
+                },
+                {
+                    "type": "CABIN_READY",
+                    "time": None,
+                    "value": None,
+                    "evidence": "салон готов",
+                },
+                {
+                    "type": "REPORTED_READY",
+                    "time": None,
+                    "value": None,
+                    "evidence": "все готовы",
+                },
+                {
+                    "type": "FUEL_STARTED",
+                    "time": "18:09",
+                    "value": None,
+                    "evidence": "Заправку закончили",
+                },
             ]
         },
         original,
     )
     assert [event["type"] for event in events] == [
-        "CHOCKS_ON", "STAND", "FUEL_COMPLETED", "CABIN_READY"
+        "CHOCKS_ON",
+        "STAND",
+        "FUEL_COMPLETED",
+        "CABIN_READY",
     ]
     assert events[2]["time"] is None
 
 
 def test_ground_store_persists_events_and_ignores_duplicate_updates(tmp_path):
     store = GroundStore(tmp_path / "ground.db")
-    event = {"type": "CABIN_READY", "time": None, "value": None, "evidence": "салон готов"}
+    event = {
+        "type": "CABIN_READY",
+        "time": None,
+        "value": None,
+        "evidence": "салон готов",
+    }
     assert store.record(42, "ABC123", 101, "салон готов", [event])
     assert not store.record(42, "ABC123", 101, "салон готов", [event])
     entries = store.events(42, "ABC123")
@@ -48,9 +86,16 @@ async def test_ground_selection_and_capture(monkeypatch, tmp_path):
     monkeypatch.setattr(
         ground_status,
         "extract_events",
-        AsyncMock(return_value=[
-            {"type": "CABIN_READY", "time": None, "value": None, "evidence": "салон готов"}
-        ]),
+        AsyncMock(
+            return_value=[
+                {
+                    "type": "CABIN_READY",
+                    "time": None,
+                    "value": None,
+                    "evidence": "салон готов",
+                }
+            ]
+        ),
     )
     ctx = SimpleNamespace(
         user_data={}, bot=SimpleNamespace(send_chat_action=AsyncMock())
@@ -58,7 +103,10 @@ async def test_ground_selection_and_capture(monkeypatch, tmp_path):
     open_event = update_for("GROUND STATUS")
     await bot.handle_message(open_event, ctx)
     assert ctx.user_data["ground_selecting"]
-    assert "Введите номер рейса" in open_event.effective_message.reply_text.call_args.args[0]
+    assert (
+        "Введите номер рейса"
+        in open_event.effective_message.reply_text.call_args.args[0]
+    )
     select = update_for("ABC123")
     await bot.handle_message(select, ctx)
     assert ctx.user_data["ground_flight"] == "ABC123"
