@@ -98,7 +98,13 @@ def accepts_message(update, context):
             or message.text.strip() == SCHEDULE_BUTTON
             or message.text.strip() in HOME_PLACEHOLDERS
             or message.text.strip()
-            in {"FLEET DOCS", "GROUND STATUS", "CHARTER CHECK", "ANALYTICS", "OPS BRIEF"}
+            in {
+                "FLEET DOCS",
+                "GROUND STATUS",
+                "CHARTER CHECK",
+                "ANALYTICS",
+                "OPS BRIEF",
+            }
             or pending_reply(update, context)
             or bool(context.user_data.get("ground_flight"))
             or bool(context.user_data.get("ground_selecting"))

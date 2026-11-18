@@ -103,9 +103,7 @@ def notes_info(state, station):
     if station is None:
         return ["Заметки по позиции: аэропорт не определён."]
     if state["notes_access"] == "unbound":
-        return [
-            "Заметки по позиции: нужна подтверждённая привязка сотрудника."
-        ]
+        return ["Заметки по позиции: нужна подтверждённая привязка сотрудника."]
     if state["notes_access"] != "ready":
         return ["Заметки по позиции: источник недоступен."]
     rows = state["notes"].get(station)
@@ -176,7 +174,11 @@ def brief_page(state, page=0):
         )
     rows.append(nav)
     rows.append(
-        [InlineKeyboardButton("↻ Обновить", callback_data=f"opb:{state['token']}:refresh:0")]
+        [
+            InlineKeyboardButton(
+                "↻ Обновить", callback_data=f"opb:{state['token']}:refresh:0"
+            )
+        ]
     )
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
@@ -255,9 +257,7 @@ async def load_ops_brief(user_id):
         async def get_station(station):
             async with slots:
                 try:
-                    rows = await asyncio.to_thread(
-                        notes.list, user_id, station, 20, 0
-                    )
+                    rows = await asyncio.to_thread(notes.list, user_id, station, 20, 0)
                     return station, current_notes(rows, now)
                 except (ValueError, PermissionError, OSError):
                     return station, None
