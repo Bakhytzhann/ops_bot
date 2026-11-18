@@ -12,19 +12,40 @@ from tests.test_bot_commands import update_for
 
 def flight(nid, reg, departure, arrival, dep, arr):
     return {
-        "flightNid": nid, "aircraft": reg, "aircraftType": "GLF6",
-        "flightNumber": f"ABC{nid}", "departureUTC": departure,
-        "arrivalUTC": arrival, "departure": dep, "arrival": arr,
+        "flightNid": nid,
+        "aircraft": reg,
+        "aircraftType": "GLF6",
+        "flightNumber": f"ABC{nid}",
+        "departureUTC": departure,
+        "arrivalUTC": arrival,
+        "departure": dep,
+        "arrival": arr,
     }
 
 
 def test_fleet_distinguishes_scheduled_from_actual_position():
     now = datetime(2026, 11, 18, 12, tzinfo=UTC)
     flights = [
-        flight(1, "UP-AAA", "2026-11-18T09:00:00Z", "2026-11-18T10:00:00Z", "UAAA", "UACC"),
-        flight(2, "UP-AAA", "2026-11-18T18:00:00Z", "2026-11-18T20:00:00Z", "UACC", "UGTB"),
-        flight(3, "UP-BBB", "2026-11-18T11:00:00Z", "2026-11-18T15:00:00Z", "UAAA", "OMDB"),
-        {**flight(4, "UP-CCC", "2026-11-18T10:00:00Z", "2026-11-18T11:00:00Z", "UAAA", "UACC"), "cancelled": True},
+        flight(
+            1, "UP-AAA", "2026-11-18T09:00:00Z", "2026-11-18T10:00:00Z", "UAAA", "UACC"
+        ),
+        flight(
+            2, "UP-AAA", "2026-11-18T18:00:00Z", "2026-11-18T20:00:00Z", "UACC", "UGTB"
+        ),
+        flight(
+            3, "UP-BBB", "2026-11-18T11:00:00Z", "2026-11-18T15:00:00Z", "UAAA", "OMDB"
+        ),
+        {
+            **flight(
+                4,
+                "UP-CCC",
+                "2026-11-18T10:00:00Z",
+                "2026-11-18T11:00:00Z",
+                "UAAA",
+                "UACC",
+            ),
+            "cancelled": True,
+        },
     ]
     fleet = charter_check.build_fleet({"flights": flights}, now)
     assert [f["registration"] for f in fleet] == ["UP-AAA", "UP-BBB"]
@@ -35,7 +56,9 @@ def test_fleet_distinguishes_scheduled_from_actual_position():
 
 def test_fleet_page_discloses_incomplete_schedule():
     state = {
-        "token": "test", "fleet": [], "complete": False,
+        "token": "test",
+        "fleet": [],
+        "complete": False,
         "fetched_at": "2026-11-18T12:00:00+00:00",
     }
     text, _ = charter_check.fleet_page("test", state)
@@ -46,7 +69,8 @@ def test_fleet_page_discloses_incomplete_schedule():
 @pytest.mark.asyncio
 async def test_charter_button_reads_leon(monkeypatch):
     monkeypatch.setattr(
-        charter_check, "get_flight_schedule",
+        charter_check,
+        "get_flight_schedule",
         AsyncMock(return_value={"flights": [], "complete": True}),
     )
     ctx = SimpleNamespace(user_data={})
@@ -59,8 +83,12 @@ async def test_charter_button_reads_leon(monkeypatch):
 @pytest.mark.asyncio
 async def test_charter_details_unknowns_without_crew():
     item = {
-        "registration": "UP-AAA", "type": "GLF6",
-        "last": None, "active": None, "next": None, "flights": [],
+        "registration": "UP-AAA",
+        "type": "GLF6",
+        "last": None,
+        "active": None,
+        "next": None,
+        "flights": [],
     }
     result = await charter_check.detail_text(item, False)
     assert "MEL / технические ограничения: реестр не подключён" in result

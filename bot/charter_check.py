@@ -40,13 +40,19 @@ def build_fleet(schedule, now=None):
     for registration, flights in sorted(groups.items()):
         flights.sort(key=lambda f: utc(f["departureUTC"]))
         active = next(
-            (f for f in flights if utc(f["departureUTC"]) <= now < utc(f["arrivalUTC"])),
+            (
+                f
+                for f in flights
+                if utc(f["departureUTC"]) <= now < utc(f["arrivalUTC"])
+            ),
             None,
         )
         previous = [f for f in flights if utc(f["arrivalUTC"]) <= now]
         upcoming = [f for f in flights if utc(f["departureUTC"]) > now]
         last = max(previous, key=lambda f: utc(f["arrivalUTC"])) if previous else None
-        next_flight = min(upcoming, key=lambda f: utc(f["departureUTC"])) if upcoming else None
+        next_flight = (
+            min(upcoming, key=lambda f: utc(f["departureUTC"])) if upcoming else None
+        )
         result.append(
             {
                 "registration": registration,
@@ -112,18 +118,35 @@ def fleet_page(token, state, page=0):
             ]
         )
         rows.append(
-            [InlineKeyboardButton(
-                f"{item['registration']} · подробнее", callback_data=f"char:{token}:detail:{idx}"
-            )]
+            [
+                InlineKeyboardButton(
+                    f"{item['registration']} · подробнее",
+                    callback_data=f"char:{token}:detail:{idx}",
+                )
+            ]
         )
     nav = []
     if page:
-        nav.append(InlineKeyboardButton("←", callback_data=f"char:{token}:page:{page - 1}"))
-    nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data=f"char:{token}:page:{page}"))
+        nav.append(
+            InlineKeyboardButton("←", callback_data=f"char:{token}:page:{page - 1}")
+        )
+    nav.append(
+        InlineKeyboardButton(
+            f"{page + 1}/{pages}", callback_data=f"char:{token}:page:{page}"
+        )
+    )
     if page + 1 < pages:
-        nav.append(InlineKeyboardButton("→", callback_data=f"char:{token}:page:{page + 1}"))
+        nav.append(
+            InlineKeyboardButton("→", callback_data=f"char:{token}:page:{page + 1}")
+        )
     rows.append(nav)
-    rows.append([InlineKeyboardButton("↻ Обновить Leon", callback_data=f"char:{token}:refresh:0")])
+    rows.append(
+        [
+            InlineKeyboardButton(
+                "↻ Обновить Leon", callback_data=f"char:{token}:refresh:0"
+            )
+        ]
+    )
     return "\n".join(lines).strip(), InlineKeyboardMarkup(rows)
 
 
@@ -166,19 +189,27 @@ async def detail_text(item, complete):
     next_flight = item["next"]
     if not complete:
         lines.append("Расписание неполное: отсутствие конфликта не подтверждено.")
-    if next_flight and type(next_flight.get("flightNid")) is int and next_flight["flightNid"] > 0:
+    if (
+        next_flight
+        and type(next_flight.get("flightNid")) is int
+        and next_flight["flightNid"] > 0
+    ):
         try:
             crew = await asyncio.wait_for(
                 get_flight_crew(next_flight["flightNid"]), timeout=30
             )
             lines.extend(
-                ["", "Назначенный экипаж следующего рейса · Leon",
-                 format_flight_crew(
-                     next_flight.get("flightNumber") or "—",
-                     str(next_flight["departureUTC"])[:10],
-                     crew.get("crew"), compact=True,
-                     flight_nid=next_flight["flightNid"],
-                 )]
+                [
+                    "",
+                    "Назначенный экипаж следующего рейса · Leon",
+                    format_flight_crew(
+                        next_flight.get("flightNumber") or "—",
+                        str(next_flight["departureUTC"])[:10],
+                        crew.get("crew"),
+                        compact=True,
+                        flight_nid=next_flight["flightNid"],
+                    ),
+                ]
             )
             try:
                 block = await asyncio.wait_for(
@@ -218,7 +249,9 @@ async def charter_callback(update, context):
         or state["token"] != parts[1]
         or state["expires"] < monotonic()
     ):
-        await query.answer("Данные устарели. Откройте CHARTER CHECK снова.", show_alert=True)
+        await query.answer(
+            "Данные устарели. Откройте CHARTER CHECK снова.", show_alert=True
+        )
         return
     index = int(parts[3])
     if parts[2] == "detail" and index >= len(state["fleet"]):
@@ -234,14 +267,18 @@ async def charter_callback(update, context):
         text = await detail_text(state["fleet"][index], state["complete"])
         markup = InlineKeyboardMarkup(
             [
-                [InlineKeyboardButton(
-                    "← К списку ВС",
-                    callback_data=f"char:{state['token']}:page:{index // PAGE_SIZE}",
-                )],
-                [InlineKeyboardButton(
-                    "↻ Обновить Leon",
-                    callback_data=f"char:{state['token']}:refresh:0",
-                )],
+                [
+                    InlineKeyboardButton(
+                        "← К списку ВС",
+                        callback_data=f"char:{state['token']}:page:{index // PAGE_SIZE}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "↻ Обновить Leon",
+                        callback_data=f"char:{state['token']}:refresh:0",
+                    )
+                ],
             ]
         )
     await update.effective_message.reply_text(text, reply_markup=markup)
