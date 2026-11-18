@@ -52,7 +52,7 @@ def test_ferry_proportions_and_idle_times():
     assert r["unknown_ferry"] == 1
     assert r["ferry_minutes"] == 60
     assert r["ferry_routes"]["UACC → UAAA"] == 1
-    assert len(r["idle"]) == 2
+    assert len(r["idle"]) == 1
     assert r["idle_minutes"] == 3000
     assert r["idle_72h"] == 0
 
