@@ -125,6 +125,7 @@ def menu():
 
 def quote_view(state):
     data = estimate(**state)
+
     def money(number):
         return f"${number:,.0f}"
 
