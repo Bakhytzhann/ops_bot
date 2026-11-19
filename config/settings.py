@@ -1,15 +1,23 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+from config.paths import project_directory
+
+TELEGRAM_USER_ID_LIMIT = 2**52
+
+
+def parse_user_ids(value: str) -> set[int]:
+    users = {int(part.strip()) for part in value.split(",") if part.strip()}
+    if any(not 0 < user < TELEGRAM_USER_ID_LIMIT for user in users):
+        raise ValueError("Telegram user IDs must be positive integers below 2^52")
+    return users
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(BASE_DIR / ".env.local", BASE_DIR / ".env"),
         env_file_encoding="utf-8-sig",
         extra="ignore",
         case_sensitive=False,
@@ -49,8 +57,8 @@ class Settings(BaseSettings):
     foreflight_api_url: str = ""
 
     # Storage
-    database_path: Path = BASE_DIR / "data" / "agent.db"
-    log_dir: Path = BASE_DIR / "logs"
+    database_path: Path = Path("data/agent.db")
+    log_dir: Path = Path("logs")
 
     # Network
     api_timeout: float = Field(default=30.0, gt=0)
@@ -62,24 +70,24 @@ class Settings(BaseSettings):
     snapshot_ftl_ttl: float = Field(default=60, ge=0)
     weather_stale_hours: float = Field(default=2, gt=0)
 
+    def __init__(self, **values):
+        if "_env_file" not in values:
+            root = project_directory()
+            values["_env_file"] = (root / ".env.local", root / ".env")
+        super().__init__(**values)
+
+    @field_validator("database_path", "log_dir")
+    @classmethod
+    def resolve_path(cls, value):
+        return (project_directory() / value).resolve()
+
     @property
     def admin_ids(self) -> set[int]:
-        return {
-            int(value.strip())
-            for value in self.telegram_admin_ids.split(",")
-            if value.strip()
-        }
+        return parse_user_ids(self.telegram_admin_ids)
 
     @property
     def allowed_user_ids(self) -> set[int]:
-        if not self.telegram_allowed_user_ids.strip():
-            return set()
-
-        return {
-            int(user_id.strip())
-            for user_id in self.telegram_allowed_user_ids.split(",")
-            if user_id.strip()
-        }
+        return parse_user_ids(self.telegram_allowed_user_ids)
 
 
 @lru_cache
@@ -87,4 +95,7 @@ def get_settings() -> Settings:
     return Settings()
 
 
-settings = get_settings()
+def __getattr__(name):
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(name)

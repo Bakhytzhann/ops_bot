@@ -3,13 +3,14 @@
 import asyncio
 import logging
 import re
+from hashlib import sha256
 from html import escape
 from time import perf_counter
 
 from loguru import logger as timing_logger
 from telegram import BotCommandScopeAllPrivateChats, ForceReply, Update
 from telegram.constants import ChatAction
-from telegram.error import TelegramError
+from telegram.error import Conflict, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -51,6 +52,7 @@ from bot.keyboards import SCHEDULE_BUTTON
 from bot.main_screen import HOME_ACTIONS, dispatch_screen
 from bot.message_edits import edit_message_text
 from bot.ops_brief import ops_brief_callback, show_ops_brief
+from config.instance_lock import windows_instance
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
 
@@ -376,8 +378,8 @@ async def setup_telegram(application):
     BOT_USERNAME = application.bot.username
     from bot.access import access_store
 
-    for user in settings.allowed_user_ids:
-        access_store.get(user)
+    with access_store.connect():
+        pass
     if not settings.admin_ids:
         timing_logger.warning(
             "TELEGRAM_ADMIN_IDS is empty; admission decisions are unavailable"
@@ -422,10 +424,63 @@ def create_application():
     return application
 
 
-def run_bot():
+async def managed_polling(application, wait_for_stop, on_ready):
+    updater = application.updater
+    stop_requested = asyncio.Event()
+    conflict = None
+
+    def polling_error(error):
+        nonlocal conflict
+        if isinstance(error, Conflict):
+            conflict = error
+            stop_requested.set()
+        else:
+            logger.warning("Telegram polling error: %s", type(error).__name__)
+
+    loop = asyncio.get_running_loop()
+
+    async def poll():
+        async with application:
+            await application.post_init(application)
+            if stop_requested.is_set():
+                return
+            try:
+                await updater.start_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=True,
+                    error_callback=polling_error,
+                )
+                await application.start()
+                if not stop_requested.is_set():
+                    on_ready()
+                await stop_requested.wait()
+            finally:
+                try:
+                    if updater.running:
+                        await updater.stop()
+                finally:
+                    if application.running:
+                        await application.stop()
+
+    wait_for_stop(lambda: loop.call_soon_threadsafe(stop_requested.set))
+    await poll()
+    if conflict is not None:
+        raise conflict
+
+
+def run_bot(*, watch_for_stop=None, on_ready=None):
     application = create_application()
-    print("OPS Bot · private authorized chats · button-driven operations")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    # Regenerating a token leaves the bot ID intact.
+    bot_id = application.bot.token.partition(":")[0]
+    lock_name = sha256(bot_id.encode()).hexdigest()
+    with windows_instance(f"Global\\OPSBot.Polling.{lock_name}"):
+        if watch_for_stop is None:
+            print("OPS Bot · private authorized chats · button-driven operations")
+            application.run_polling(
+                allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+            )
+        else:
+            asyncio.run(managed_polling(application, watch_for_stop, on_ready))
 
 
 if __name__ == "__main__":
