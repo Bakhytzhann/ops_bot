@@ -1,8 +1,4 @@
-"""Read-only staff fleet brief: last scheduled position, next flight and station notes.
-
-Aircraft location comes from Leon schedule, not real-time tracking or confirmed
-arrival. Notes are read from the existing permission-checked station repository.
-"""
+"""Scheduled aircraft positions, upcoming flights and station notes."""
 
 import asyncio
 import re
@@ -10,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from secrets import token_hex
 from time import monotonic
 
+from httpx import HTTPError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.admission import require_user
@@ -280,7 +277,7 @@ async def show_ops_brief(update, context):
     require_user(update)
     try:
         state = await load_ops_brief(update.effective_user.id)
-    except (TimeoutError, ValueError, OSError, RuntimeError, TypeError):
+    except (HTTPError, TimeoutError, ValueError, OSError, RuntimeError, TypeError):
         await update.effective_message.reply_text(
             "OPS BRIEF · Не удалось загрузить расписание Leon. Повторите позже."
         )

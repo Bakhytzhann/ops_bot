@@ -119,7 +119,7 @@ def menu():
                 for j in range(index, min(index + 2, len(DEMO_ROUTES)))
             ]
         )
-    rows.append([InlineKeyboardButton("← К флоту", callback_data="quote:fleet:0")])
+    rows.append([InlineKeyboardButton("← Разделы", callback_data="quote:fleet:0")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
@@ -188,7 +188,7 @@ def quote_view(state):
         ],
         [
             InlineKeyboardButton("← 20 маршрутов", callback_data="quote:menu:0"),
-            InlineKeyboardButton("← Флот", callback_data="quote:fleet:0"),
+            InlineKeyboardButton("← Разделы", callback_data="quote:fleet:0"),
         ],
     ]
     return "\n".join(text), InlineKeyboardMarkup(rows)

@@ -81,8 +81,6 @@ class MainScreen:
         if self.context.user_data.get("screen_back"):
             rows.append([InlineKeyboardButton("← Назад", callback_data="screen:back")])
         markup = InlineKeyboardMarkup(rows)
-        # Generic reports used to be sent as multiple messages. Keep every page
-        # available through inline navigation instead of overwriting each chunk.
         pages = text_pages(text)
         token = token_hex(6)
         state = {"token": token, "pages": pages, "markup": markup, "kwargs": kwargs}
@@ -317,7 +315,6 @@ async def dispatch_screen(update, context, handler):
     elif not query and text in HOME_ACTIONS:
         previous = context.user_data.get("main_screen_pages")
         if previous:
-            # Only one previous screen, in memory. Not a chat history.
             context.user_data["screen_back"] = previous
 
     if query and (query.data or "").startswith("docs:"):

@@ -8,7 +8,7 @@ import pytest
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from telegram.error import BadRequest, TimedOut
 
-from bot import admission, bot, flight_browser
+from bot import admission, bot, charter_check, flight_browser, ground_turns, ops_brief
 from bot.keyboards import home_keyboard
 from bot.main_screen import MainScreen, dispatch_screen, text_pages
 from services.snapshot_models import FlightSnapshot
@@ -77,7 +77,26 @@ async def test_start_installs_keyboard_then_one_editable_screen(screen_context):
 
 
 @pytest.mark.asyncio
-async def test_all_home_actions_share_screen_without_inline_menu(screen_context):
+async def test_all_home_actions_share_screen_without_inline_menu(
+    screen_context, monkeypatch
+):
+    monkeypatch.setattr(
+        ground_turns,
+        "load_ground_flights",
+        AsyncMock(
+            return_value={
+                "cards": [],
+                "schedule_complete": True,
+                "watch_complete": True,
+            }
+        ),
+    )
+    for module in (ops_brief, charter_check):
+        monkeypatch.setattr(
+            module,
+            "get_flight_schedule",
+            AsyncMock(return_value={"flights": [], "complete": True}),
+        )
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
     for title in (

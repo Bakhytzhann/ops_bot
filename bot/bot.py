@@ -40,12 +40,15 @@ from bot.flight_browser import (
     is_card_notice_callback,
     show_week,
 )
-from bot.ground_status import GROUND_MARKUP, handle_ground_message
-from bot.keyboards import (
-    HOME_PLACEHOLDERS,
-    SCHEDULE_BUTTON,
+from bot.ground_turns import (
+    clear_ground_turn_input,
+    ground_turn_callback,
+    handle_ground_turn_input,
+    has_ground_turn_input,
+    show_ground_turns,
 )
-from bot.main_screen import dispatch_screen
+from bot.keyboards import SCHEDULE_BUTTON
+from bot.main_screen import HOME_ACTIONS, dispatch_screen
 from bot.message_edits import edit_message_text
 from bot.ops_brief import ops_brief_callback, show_ops_brief
 from config.settings import settings
@@ -95,19 +98,9 @@ def accepts_message(update, context):
         and message.text
         and (
             parsed_command(message.text)
-            or message.text.strip() == SCHEDULE_BUTTON
-            or message.text.strip() in HOME_PLACEHOLDERS
-            or message.text.strip()
-            in {
-                "FLEET DOCS",
-                "GROUND STATUS",
-                "CHARTER CHECK",
-                "ANALYTICS",
-                "OPS BRIEF",
-            }
+            or message.text.strip() in HOME_ACTIONS
             or pending_reply(update, context)
-            or bool(context.user_data.get("ground_flight"))
-            or bool(context.user_data.get("ground_selecting"))
+            or has_ground_turn_input(context)
         )
     )
 
@@ -162,8 +155,8 @@ async def handle_button(update, context):
     if (query.data or "").startswith("char:"):
         await charter_callback(update, context)
         return
-    if query.data == "ground:link":
-        await query.answer("Функция ссылки ещё не реализована.", show_alert=True)
+    if (query.data or "").startswith("gt:"):
+        await ground_turn_callback(update, context)
         return
     if (query.data or "").startswith("docs:"):
         category = query.data.removeprefix("docs:")
@@ -282,44 +275,28 @@ async def _handle_message(update, context):
         return
     command = parsed_command(message.text)
     text = message.text.strip()
+    if text in HOME_ACTIONS or command:
+        clear_ground_turn_input(context)
     if text == "OPS BRIEF":
-        context.user_data.pop("ground_flight", None)
-        context.user_data.pop("ground_selecting", None)
         await show_ops_brief(update, context)
         return
     if text == "ANALYTICS":
-        context.user_data.pop("ground_flight", None)
-        context.user_data.pop("ground_selecting", None)
         await show_analytics(update, context)
         return
     if text == "CHARTER CHECK":
-        context.user_data.pop("ground_flight", None)
-        context.user_data.pop("ground_selecting", None)
         await show_charter(update, context)
         return
     if text == "GROUND STATUS":
-        context.user_data.pop("ground_flight", None)
-        context.user_data["ground_selecting"] = True
-        await message.reply_text(
-            "GROUND STATUS · Введите номер рейса или регистрацию ВС. "
-            "Затем отправляйте события свободным текстом: «колодки 1235», "
-            "«заправку закончили», «салон готов».",
-            reply_markup=GROUND_MARKUP,
-        )
+        await show_ground_turns(update, context)
         return
-    if text in HOME_PLACEHOLDERS | {"FLEET DOCS", SCHEDULE_BUTTON} or command:
-        context.user_data.pop("ground_flight", None)
-        context.user_data.pop("ground_selecting", None)
     if text == SCHEDULE_BUTTON or (command and command[0] in {"week", "sked"}):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
         )
         await weekly_flow(update, context)
         return
-    if (
-        text in HOME_PLACEHOLDERS
-        or text == "FLEET DOCS"
-        or (command and command[0] in {"start", "menu", "help", "cancel", "access"})
+    if text == "FLEET DOCS" or (
+        command and command[0] in {"start", "menu", "help", "cancel", "access"}
     ):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
@@ -331,8 +308,6 @@ async def _handle_message(update, context):
             await message.reply_text(
                 "FLEET DOCS · выберите раздел", reply_markup=fleet_docs_keyboard()
             )
-        elif text in HOME_PLACEHOLDERS:
-            await message.reply_text(f"{text}: функция пока не подключена.")
         elif command and command[0] == "cancel":
             await message.reply_text("Ввод отменён.")
         elif command and command[0] == "help":
@@ -341,11 +316,8 @@ async def _handle_message(update, context):
             await message.reply_text("Выберите раздел на клавиатуре.")
         # /start only installs the persistent keyboard; no duplicate reply.
         return
-    if not command and (
-        context.user_data.get("ground_flight")
-        or context.user_data.get("ground_selecting")
-    ):
-        await handle_ground_message(update, context)
+    if not command and has_ground_turn_input(context):
+        await handle_ground_turn_input(update, context)
         return
     if command:
         action, arguments = command
@@ -402,7 +374,6 @@ async def _handle_message(update, context):
 async def setup_telegram(application):
     global BOT_USERNAME
     BOT_USERNAME = application.bot.username
-    # Import legacy allowlist into persistent storage before serving updates.
     from bot.access import access_store
 
     for user in settings.allowed_user_ids:

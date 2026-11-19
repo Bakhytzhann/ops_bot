@@ -23,11 +23,6 @@ def main():
             exist_ok=True,
         )
 
-        settings.log_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         run_bot()
 
     except KeyboardInterrupt:

@@ -130,3 +130,59 @@ async def test_button_and_period_views(monkeypatch):
     await bot.handle_button(old, ctx)
     assert old.callback_query.answer.call_args.kwargs["show_alert"] is True
     mocked.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ai_analytics_defaults_to_seven_days_and_switches_period(monkeypatch):
+    ctx = SimpleNamespace(user_data={})
+    message = update_for("ANALYTICS")
+    load = AsyncMock(return_value={"loaded": True})
+    summarize = AsyncMock(return_value="Сводка метрик")
+    monkeypatch.setattr(analytics, "load_journey_insights", load)
+    monkeypatch.setattr(analytics, "build_insights", lambda data: data)
+    monkeypatch.setattr(analytics, "analyze_metrics", summarize)
+
+    await bot.handle_message(message, ctx)
+    initial = message.effective_message.reply_text.call_args.kwargs["reply_markup"]
+    entry = next(
+        button
+        for row in initial.inline_keyboard
+        for button in row
+        if button.text == "ИИ · Метрики и рекомендации"
+    )
+    load.assert_not_awaited()
+
+    async def open_button(data):
+        update = update_for(None)
+        update.callback_query = SimpleNamespace(
+            data=data, answer=AsyncMock(), edit_message_text=AsyncMock()
+        )
+        await bot.handle_button(update, ctx)
+        return update.callback_query.edit_message_text.call_args
+
+    opened = await open_button(entry.callback_data)
+    assert opened.args[0] == "Сводка метрик"
+    markup = opened.kwargs["reply_markup"]
+    periods = markup.inline_keyboard[0]
+    assert [button.text for button in periods] == [
+        "● 7 дней",
+        "30 дней",
+        "90 дней",
+        "Год",
+    ]
+    for button in periods[1:]:
+        switched = await open_button(button.callback_data)
+        assert switched.args[0] == "Сводка метрик"
+    assert [
+        (call.args[1] - call.args[0]).days + 1 for call in load.await_args_list
+    ] == [7, 30, 90, 365]
+    assert all(call.kwargs == {"refresh": False} for call in load.await_args_list)
+    back = await open_button(markup.inline_keyboard[-1][0].callback_data)
+    assert "выберите период" in back.args[0]
+
+
+def test_ai_analytics_year_uses_last_365_completed_utc_days():
+    assert analytics.insight_dates("year", today=date(2024, 3, 1)) == (
+        date(2023, 3, 2),
+        date(2024, 2, 29),
+    )

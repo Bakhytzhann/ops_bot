@@ -32,8 +32,5 @@ def setup_logging():
         enqueue=True,
     )
 
-    # Disable verbose HTTP library logging.
     for name in ("httpx", "httpcore", "telegram"):
         logging.getLogger(name).setLevel(logging.WARNING)
-
-    return logger

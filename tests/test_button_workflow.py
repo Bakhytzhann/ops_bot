@@ -8,7 +8,6 @@ import pytest
 from agent.core import agent
 from bot import bot
 from bot.commands import COMMANDS
-from bot.keyboards import HOME_PLACEHOLDERS
 from tests.test_bot_commands import update_for
 
 
@@ -56,15 +55,6 @@ async def test_disabled_buttons_cannot_reach_tools(context, monkeypatch, data):
     await bot.handle_button(update, context)
     prompt.assert_not_awaited()
     assert update.callback_query.answer.called
-    agent.chat.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("label", sorted(HOME_PLACEHOLDERS))
-async def test_home_placeholders_do_not_call_operations(context, label):
-    update = update_for(label)
-    await bot.handle_message(update, context)
-    assert "пока не подключена" in update.effective_message.reply_text.call_args.args[0]
     agent.chat.assert_not_awaited()
 
 

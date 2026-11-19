@@ -12,7 +12,13 @@ class SourceCache:
         self.locks = {}
 
     async def get(self, key, ttl, loader, *, refresh=False):
-        state = self.locks.setdefault(key, [asyncio.Lock(), 0])
+        state = self.locks.get(key)
+        entry = self.entries.get(key)
+        if state is None and entry and not refresh and monotonic() - entry[0] < ttl:
+            self.entries.move_to_end(key)
+            return entry[1]
+        if state is None:
+            state = self.locks[key] = [asyncio.Lock(), 0]
         lock = state[0]
         state[1] += 1
         try:

@@ -68,16 +68,88 @@ def test_fleet_page_discloses_incomplete_schedule():
 
 @pytest.mark.asyncio
 async def test_charter_button_reads_leon(monkeypatch):
+    schedule = AsyncMock(return_value={"flights": [], "complete": True})
     monkeypatch.setattr(
         charter_check,
         "get_flight_schedule",
-        AsyncMock(return_value={"flights": [], "complete": True}),
+        schedule,
     )
     ctx = SimpleNamespace(user_data={})
     update = update_for("CHARTER CHECK")
     await bot.handle_message(update, ctx)
-    assert "Fleet Availability" in update.effective_message.reply_text.call_args.args[0]
-    assert ctx.user_data["charter_fleet"]["complete"] is True
+    assert "Выберите раздел" in update.effective_message.reply_text.call_args.args[0]
+    schedule.assert_not_awaited()
+
+    markup = update.effective_message.reply_text.call_args.kwargs["reply_markup"]
+    callback = update_for(None)
+    callback.callback_query = SimpleNamespace(
+        data=markup.inline_keyboard[0][0].callback_data,
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    await bot.handle_button(callback, ctx)
+    assert (
+        "Fleet Availability"
+        in callback.callback_query.edit_message_text.call_args.args[0]
+    )
+    assert ctx.user_data["charter_check"]["fleet_data"]["complete"] is True
+    schedule.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_unprivileged_sales_callback_never_reads_requests(monkeypatch):
+    monkeypatch.setattr(charter_check, "can_view_charter_sales", lambda _: False)
+    fetch_requests = AsyncMock()
+    monkeypatch.setattr(charter_check, "list_charter_requests", fetch_requests)
+    ctx = SimpleNamespace(user_data={})
+    await charter_check.show_charter(update_for("CHARTER CHECK"), ctx)
+    token = ctx.user_data["charter_check"]["token"]
+    callback = update_for(None)
+    callback.callback_query = SimpleNamespace(
+        data=f"char:{token}:sales:0", answer=AsyncMock()
+    )
+    await bot.handle_button(callback, ctx)
+    assert callback.callback_query.answer.call_args.kwargs["show_alert"] is True
+    fetch_requests.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_journey_route_analysis_uses_selected_type_and_aggregate(monkeypatch):
+    end = datetime.now(UTC).date()
+    stats = charter_check.journey_history.summary(end, end)
+    stats.update(
+        actual_count=1,
+        routes=[{"departure": "UAAA", "arrival": "UACC", "count": 1}],
+        raw_journey_log="Must never reach the model",
+    )
+    calls = []
+
+    def summary(start, end, **filters):
+        calls.append(filters)
+        return stats
+
+    review = AsyncMock(return_value="ИИ · Разбор маршрута")
+    monkeypatch.setattr(charter_check.journey_history, "summary", summary)
+    monkeypatch.setattr(charter_check, "review_charter", review)
+    ctx = SimpleNamespace(user_data={})
+    await charter_check.show_charter(update_for("CHARTER CHECK"), ctx)
+    token = ctx.user_data["charter_check"]["token"]
+    callback = update_for(None)
+    callback.callback_query = SimpleNamespace(
+        data=f"char:{token}:routeai:30-UAAA-UACC-GLF6",
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    await bot.handle_button(callback, ctx)
+    assert calls == [{"departure": "UAAA", "arrival": "UACC", "aircraft_type": "GLF6"}]
+    evidence = review.await_args.args[0]["LEON_JOURNEY_LOG"]
+    assert evidence["filter"] == calls[0]
+    assert evidence["actual_count"] == 1
+    assert "raw_journey_log" not in evidence
+    assert (
+        callback.callback_query.edit_message_text.call_args.args[0]
+        == "ИИ · Разбор маршрута"
+    )
 
 
 @pytest.mark.asyncio

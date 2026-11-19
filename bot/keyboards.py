@@ -1,7 +1,6 @@
 from telegram import KeyboardButton, ReplyKeyboardMarkup
 
 SCHEDULE_BUTTON = "SKED"
-HOME_PLACEHOLDERS = set()
 QUICK_ACTIONS = (
     ("GROUND STATUS", "SKED", "OPS BRIEF"),
     ("FLEET DOCS", "ANALYTICS", "CHARTER CHECK"),

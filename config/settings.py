@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr | None = None
     telegram_allowed_user_ids: str = ""
     telegram_admin_ids: str = ""
+    charter_sales_user_ids: str = ""
     telegram_bot_username: str = "OPS_bot"
 
     # Leon Software API
