@@ -85,7 +85,8 @@ async def load_flight_snapshot(
             details={
                 "hotels": [
                     {
-                        "position": (member.get("position") or {}).get("name", "Crew"),
+                        "position": member["position"].get("name", "Crew")
+                        if isinstance(member.get("position"), dict) else "Crew",
                         "name": (member.get("hotel") or {}).get("name"),
                     }
                     for member in assigned_members(crew["crew"], flight["flightNid"])
