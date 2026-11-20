@@ -2,60 +2,83 @@
 
 import re
 
-from services.flight_weather import grouped_reports, station_label
+from services.flight_weather import _phenomenon, grouped_reports, station_label
 
 
-def _weather(raw):
-    body = re.split(r"\bRMK\b", raw.upper(), maxsplit=1)[0]
-    words = body.split()
+def metar_facts(raw):
+    body = re.split(r"\b(?:RMK|TEMPO|BECMG|NOSIG)\b", raw.upper(), maxsplit=1)[0]
+    words = body.rstrip("=").split()
     wind = next(
         (
             m.group(0)
             for word in words
-            if (m := re.fullmatch(r"(?:\d{3}|VRB)\d{2,3}(?:G\d{2,3})?(?:KT|MPS)", word))
+            if (
+                m := re.fullmatch(
+                    r"(?:\d{3}|VRB)\d{2,3}(?:G\d{2,3})?(?:KT|MPS|KMH)", word
+                )
+            )
         ),
-        "—",
+        None,
     )
     vis = next(
-        (word + "m" for word in words if re.fullmatch(r"\d{4}", word)),
-        "—",
+        (
+            "≥10 km" if word == "9999" else word + " m"
+            for word in words
+            if re.fullmatch(r"\d{4}", word)
+        ),
+        None,
     )
+    if match := re.search(
+        r"(?<!\S)([MP]?(?:\d+ )?\d+/\d+SM|[MP]?\d+SM)(?!\S)", body.rstrip("=")
+    ):
+        vis = match[1]
     if "CAVOK" in words:
-        vis = "≥10km (CAVOK)"
+        vis = "≥10 km (CAVOK)"
     rvr = [
         word
         for word in words
         if re.fullmatch(r"R\d{2}[LCR]?/[MP]?\d{4}(?:V[MP]?\d{4})?(?:FT)?[UDN]?", word)
     ]
-    vertical = next((word for word in words if re.fullmatch(r"VV\d{3}", word)), None)
-    ceiling = next(
-        (word for word in words if re.fullmatch(r"(?:BKN|OVC)\d{3}(?:CB|TCU)?", word)),
-        None,
+    vertical = next(
+        (word for word in words if re.fullmatch(r"VV(?:\d{3}|///)", word)), None
+    )
+    ceiling = min(
+        (
+            int(word[3:6]) * 100
+            for word in words
+            if re.fullmatch(r"(?:BKN|OVC)\d{3}(?:CB|TCU)?", word)
+        ),
+        default=None,
     )
     temp = next(
-        (word for word in words if re.fullmatch(r"M?\d{2}/(?:M?\d{2}|//)", word)),
+        (
+            word.split("/")[0]
+            for word in words
+            if re.fullmatch(r"M?\d{2}/(?:M?\d{2}|XX|//)", word)
+        ),
         None,
     )
     phenomena = [
-        word
-        for word in words
-        if re.fullmatch(
-            r"(?:\+|-|VC)?(?:TS|SH|FZ)?(?:RA|SN|DZ|SG|PL|GR|GS|BR|FG|HZ|FU|DU|SA)+",
-            word,
-        )
+        word for word in words if _phenomenon(word) and word not in ("NSC", "NCD")
     ]
-    parts = [f"Wind {wind}", f"VIS {vis}"]
+    facts = {}
+    if wind:
+        facts["Wind"] = wind
+    if vis:
+        facts["VIS"] = vis
     if rvr:
-        parts.append("RVR " + " ".join(rvr[:2]))
+        facts["RVR"] = " ".join(rvr)
+    if ceiling is not None:
+        facts["Ceiling"] = f"{ceiling} ft"
     if vertical:
-        parts.append("VV " + str(int(vertical[2:]) * 100) + "ft")
-    elif ceiling:
-        parts.append("Ceiling " + str(int(ceiling[3:6]) * 100) + "ft")
+        facts["VV"] = (
+            "NOT VERIFIED" if vertical == "VV///" else f"{int(vertical[2:]) * 100} ft"
+        )
     if temp:
-        parts.append("T/DP " + temp.replace("M", "−") + "°C")
+        facts["TEMP"] = temp.replace("M", "−") + " °C"
     if phenomena:
-        parts.append("WX " + " ".join(phenomena[:3]))
-    return " · ".join(parts)
+        facts["WX"] = " ".join(phenomena)
+    return facts
 
 
 def concise_weather(snapshot, preferences=None):
@@ -75,7 +98,14 @@ def concise_weather(snapshot, preferences=None):
         else:
             # Do not present conflicting sources as one observation.
             raw = entries[0]["raw"]
-            lines.append(f"{label}: {_weather(raw)}")
+            facts = metar_facts(raw)
+            lines.append(
+                f"{label}: "
+                + (
+                    " · ".join(f"{field} {value}" for field, value in facts.items())
+                    or "нет данных"
+                )
+            )
             if len(entries) > 1:
                 lines.append("Разные METAR у источников — см. Подготовка.")
     return "\n".join(lines)

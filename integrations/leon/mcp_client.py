@@ -20,6 +20,8 @@ ALLOWED_TOOLS = frozenset(
     {
         "search-flights",
         "get-flights-by-flight-nids",
+        "get-airport-handling-agents",
+        "get-report-wizard-flight-scope-report",
         "get-flights-crew",
         "get-flight-watch-by-flight-nids",
         "get-weather-for-flight-list",

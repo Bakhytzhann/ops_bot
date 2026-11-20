@@ -118,6 +118,12 @@ async def test_cache_coalesces_loads_and_does_not_cache_errors():
         await cache.get("y", 10, fail)
     assert "y" not in cache.entries
     assert await cache.get("x", 10, load, refresh=True) == 2
+    assert (
+        await asyncio.gather(
+            *(cache.get("x", 10, load, refresh=True) for _ in range(4))
+        )
+        == [3] * 4
+    )
 
 
 @pytest.mark.asyncio
@@ -159,6 +165,10 @@ async def test_duty_crosses_midnight_without_inventing_rest(identity, monkeypatc
     assert "14 Nov 2026 12:00Z" in block.text
     assert "Следующий допустимый старт после отдыха: не проверено" in block.text
     assert "Duty по графику" in block.details["summary"]
+    assignment = block.details["assignments"][0]
+    assert not assignment["reporting"]
+    assert not assignment["metrics"]
+    assert "next_eobt" not in assignment and "fdp_remaining" not in assignment
 
 
 @pytest.mark.asyncio

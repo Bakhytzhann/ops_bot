@@ -26,16 +26,23 @@ def flight_rows(result):
     return result["flights"]
 
 
-async def find_flight(client, number, day, leon=None):
+async def flights_for_day(client, day):
     start = datetime.combine(date.fromisoformat(day), datetime.min.time(), tzinfo=UTC)
     end = start + timedelta(days=1)
     rows = flight_rows(await client.list_flights(start, end))
-    rows = [
+    return [
         (r, departure)
         for r in rows
         if (departure := instant(r.get("departureTime"))) is not None
         and start <= departure < end
     ]
+
+
+async def find_flight(client, number, day, leon=None):
+    return match_flight(await flights_for_day(client, day), number, day, leon)
+
+
+def match_flight(rows, number, day, leon=None):
     number = normalized(number)
     matches = [r for r, _ in rows if normalized(r.get("callSign")) == number]
     basis = "номер/позывной и дата"

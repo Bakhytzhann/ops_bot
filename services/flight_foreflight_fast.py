@@ -12,10 +12,12 @@ from services.foreflight_operations import (
 from services.snapshot_models import SourceBlock
 
 
-async def load_fast_foreflight(flight):
+async def load_fast_foreflight(flight, *, match=None):
     day = str(flight.get("departureUTC") or "")[:10]
     async with ForeFlightClient() as client:
-        row, basis = await find_flight(client, flight["flightNumber"], day, flight)
+        row, basis = match or await find_flight(
+            client, flight["flightNumber"], day, flight
+        )
         if (
             normalized(row.get("departure")) != normalized(flight.get("departure"))
             or normalized(row.get("destination")) != normalized(flight.get("arrival"))
@@ -33,6 +35,21 @@ async def load_fast_foreflight(flight):
             return_exceptions=True,
         )
     result = {}
+    performance_data = (
+        performance.get("performance", performance)
+        if isinstance(performance, dict)
+        else {}
+    )
+    perf_times = performance_data.get("times") or {}
+    performance_minutes = perf_times.get("timeToDestinationMinutes")
+    if isinstance(performance, dict):
+        result["performance"] = SourceBlock(
+            "ForeFlight API",
+            status="partial"
+            if performance_data.get("errors") or performance_data.get("warnings")
+            else "ready",
+            details={"eet_minutes": performance_minutes},
+        )
     if isinstance(detail, dict):
         data = detail.get("flightData") or {}
         perf = (

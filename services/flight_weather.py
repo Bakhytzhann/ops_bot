@@ -67,6 +67,9 @@ def grouped_reports(reports, station, product):
             continue
         key = " ".join(raw.split())
         entry = grouped.setdefault(key, {**report, "sources": []})
+        for field in ("issued_at", "valid_from", "valid_to"):
+            if not entry.get(field) and report.get(field):
+                entry[field] = report[field]
         source = str(report.get("source") or "").replace("Leon MCP", "Leon")
         if source and source not in entry["sources"]:
             entry["sources"].append(source)

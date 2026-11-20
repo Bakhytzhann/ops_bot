@@ -207,7 +207,7 @@ def duty_rows(roster, ftl, nid):
     return list(ftl_rows.values()) if ftl_rows else list(result.values())
 
 
-async def load_duty(flight, crew):
+async def load_duty(flight, crew, *, include_next_duty=True):
     members = assigned_members(crew, flight["flightNid"])
     if not members:
         return SourceBlock("Leon", "Duty / Rest: назначенный экипаж не предоставлен.")
@@ -251,21 +251,30 @@ async def load_duty(flight, crew):
                 nid = None
         if type(nid) is not int or nid <= 0:
             return label + "\nDuty / Rest: нет подтверждённого loginNid.", False, result
-        async with _slots:
-            roster, ftl = await asyncio.gather(
-                call_leon(
-                    "get-duty-list",
-                    {
-                        "loginNidList": [nid],
-                        "timeInterval": interval,
-                        "dutyDefinitionNidList": None,
-                    },
-                ),
-                call_leon(
-                    "get-crew-ftl-sheet", {"crewMember": nid, "timeInterval": interval}
-                ),
-                return_exceptions=True,
+
+        async def get_roster():
+            return await call_leon(
+                "get-duty-list",
+                {
+                    "loginNidList": [nid],
+                    "timeInterval": interval,
+                    "dutyDefinitionNidList": None,
+                },
             )
+
+        async def get_ftl():
+            return await call_leon(
+                "get-crew-ftl-sheet", {"crewMember": nid, "timeInterval": interval}
+            )
+
+        async with _slots:
+            if include_next_duty:
+                roster, ftl = await asyncio.gather(
+                    get_roster(), get_ftl(), return_exceptions=True
+                )
+            else:
+                (ftl,) = await asyncio.gather(get_ftl(), return_exceptions=True)
+                roster = None
         lines = [label]
         next_scheduled = "Next scheduled duty: нет данных"
         valid_roster = False
@@ -278,6 +287,24 @@ async def load_duty(flight, crew):
         except (RuntimeError, TypeError):
             calculation = None
         reporting = reporting_interval(calculation)
+        verified_window = (
+            reporting
+            if reporting and reporting[0] <= departure and reporting[1] >= arrival
+            else None
+        )
+        if not include_next_duty and not verified_window:
+            ftl_roster = duty_rows(roster, ftl, nid)
+            if not any(
+                utc(row["startTimeIso"])
+                <= departure
+                <= arrival
+                <= utc(row["endTimeIso"])
+                for row in ftl_roster
+            ):
+                async with _slots:
+                    (roster,) = await asyncio.gather(
+                        get_roster(), return_exceptions=True
+                    )
         try:
             duties = duty_rows(roster, ftl, nid)
             matches = [
@@ -288,11 +315,7 @@ async def load_duty(flight, crew):
                 and utc(r["startTimeIso"]) <= departure
                 and utc(r["endTimeIso"]) >= arrival
             ]
-            window = (
-                reporting
-                if reporting and reporting[0] <= departure and reporting[1] >= arrival
-                else None
-            )
+            window = verified_window
             if window:
                 start, end = window
                 prefix = "Reporting duty interval"
@@ -323,16 +346,31 @@ async def load_duty(flight, crew):
         except (RuntimeError, TypeError):
             lines.append("DUTY: нет данных")
         if calculation is not None:
+            result["duty_duration"] = duration_value(calculation.get("dutyLength"))
+            result["next_eobt"] = utc(calculation.get("nextEOBT"))
+            result["violations"] = list(dict.fromkeys(offence_labels(calculation)))
             result["metrics"] = [
                 {
                     "name": title,
                     "actual": duration_value(metric.get("actual")),
                     "limit": duration_value(metric.get("limit")),
                     "offence": metric.get("offence") is True,
+                    "limit_type": metric.get("limitType"),
                 }
                 for key, title in FTL_METRICS
                 if isinstance(metric := calculation.get(key), dict)
             ]
+            fdp = calculation.get("fdpLength")
+            if isinstance(fdp, dict):
+                actual, limit = fdp.get("actual"), fdp.get("limit")
+                if (
+                    duration_value(actual) is not None
+                    and duration_value(limit) is not None
+                ):
+                    remaining = limit - actual
+                    result["fdp_remaining"] = (
+                        "−" if remaining < 0 else ""
+                    ) + duration_value(abs(remaining))
             metrics = flight_ftl(ftl, flight["flightNid"])
             next_eobt = [line for line in metrics if line.startswith("nextEOBT:")]
             lines.extend(line for line in metrics if not line.startswith("nextEOBT:"))

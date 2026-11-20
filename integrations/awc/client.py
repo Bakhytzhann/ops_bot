@@ -8,7 +8,9 @@ BASE_URL = "https://aviationweather.gov/api/data"
 SOURCE = "NOAA Aviation Weather Center (AWC)"
 
 
-async def get_weather(airports: list[str], *, include_taf: bool = True) -> dict:
+async def get_weather(
+    airports: list[str], *, include_taf: bool = True, product: str | None = None
+) -> dict:
     airports = sorted({code.upper() for code in airports})
     if (
         not airports
@@ -16,6 +18,8 @@ async def get_weather(airports: list[str], *, include_taf: bool = True) -> dict:
         or any(not re.fullmatch(r"[A-Z]{4}", c) for c in airports)
     ):
         raise ValueError("Укажите от одного до четырёх ICAO-кодов аэропортов.")
+    if product not in (None, "metar", "taf"):
+        raise ValueError("Unsupported weather product")
     async with httpx.AsyncClient(
         timeout=20,
         trust_env=False,
@@ -41,7 +45,9 @@ async def get_weather(airports: list[str], *, include_taf: bool = True) -> dict:
                 raise TypeError("Unexpected AWC response")
             return {"product": product, "data": data, "url": str(response.request.url)}
 
-        products = ("metar", "taf") if include_taf else ("metar",)
+        products = (
+            (product,) if product else ("metar", "taf") if include_taf else ("metar",)
+        )
         results = await asyncio.gather(
             *(fetch(p) for p in products), return_exceptions=True
         )

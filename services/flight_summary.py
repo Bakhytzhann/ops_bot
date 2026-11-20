@@ -57,11 +57,9 @@ def wx_summary(snapshot, preferences=None):
     return "\n".join(lines).rstrip()
 
 
-def route_summary(snapshot, preferences=None):
-    block = snapshot.blocks.get("route")
-    countries = block.details.get("overflownCountries") if block else None
-    if not isinstance(countries, list) or not countries:
-        return "Пролеты: нет данных"
+def route_countries(countries, *, unknown=None):
+    if not isinstance(countries, list):
+        return None
     codes = [
         next(
             (
@@ -71,15 +69,22 @@ def route_summary(snapshot, preferences=None):
                 and isinstance(value := country.get(key), str)
                 and value.strip().casefold() in _COUNTRY_CODES
             ),
-            "нет данных",
+            unknown,
         )
         for country in countries
     ]
-    return "Пролеты: " + ", ".join(
+    return [
         code
         for index, code in enumerate(codes)
         if not index or code != codes[index - 1]
-    )
+    ]
+
+
+def route_summary(snapshot, preferences=None):
+    block = snapshot.blocks.get("route")
+    countries = block.details.get("overflownCountries") if block else None
+    codes = route_countries(countries, unknown="нет данных")
+    return "Пролеты: " + (", ".join(codes) if codes else "нет данных")
 
 
 def notam_summary(snapshot, preferences=None):
