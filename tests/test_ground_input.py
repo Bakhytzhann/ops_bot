@@ -1,4 +1,5 @@
 """Ground Status free-form input, source selection, UTC parsing and summaries."""
+
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -17,8 +18,12 @@ async def test_qwen_interval_is_validated_and_kept_in_utc(monkeypatch):
 
     qwen = AsyncMock(
         return_value=SimpleNamespace(
-            flight="", kind="FUEL", start="1310", end="1345",
-            note="", critical=False,
+            flight="",
+            kind="FUEL",
+            start="1310",
+            end="1345",
+            note="",
+            critical=False,
         )
     )
     monkeypatch.setattr(ai_analysis, "request_analysis", qwen)
@@ -39,8 +44,12 @@ async def test_free_note_keeps_original_text(monkeypatch):
 
     qwen = AsyncMock(
         return_value=SimpleNamespace(
-            flight="", kind="NOTE", start="", end="",
-            note="ТЗ поздно приехал из-за пробки", critical=False,
+            flight="",
+            kind="NOTE",
+            start="",
+            end="",
+            note="ТЗ поздно приехал из-за пробки",
+            critical=False,
         )
     )
     monkeypatch.setattr(ai_analysis, "request_analysis", qwen)
@@ -55,9 +64,13 @@ async def test_free_note_keeps_original_text(monkeypatch):
 async def test_explicit_flight_updates_card_and_deletes_message(monkeypatch):
     now = datetime.now(UTC) - timedelta(hours=1)
     turn = {
-        "key": "UAAA:o:123", "station": "UAAA", "outbound_id": 123,
-        "outbound_number": "ABC123", "registration": "UP-ABC",
-        "status": "active", "reference_time": now,
+        "key": "UAAA:o:123",
+        "station": "UAAA",
+        "outbound_id": 123,
+        "outbound_number": "ABC123",
+        "registration": "UP-ABC",
+        "status": "active",
+        "reference_time": now,
     }
     monkeypatch.setattr(ui, "require_user", lambda _: None)
     monkeypatch.setattr(
@@ -75,7 +88,8 @@ async def test_explicit_flight_updates_card_and_deletes_message(monkeypatch):
         ui,
         "ground_turns",
         SimpleNamespace(
-            record_many=record_many, observe=Mock(),
+            record_many=record_many,
+            observe=Mock(),
             events=Mock(return_value=[]),
         ),
     )
@@ -88,33 +102,43 @@ async def test_explicit_flight_updates_card_and_deletes_message(monkeypatch):
     await ui.handle_ground_text(message, context)
     assert record_many.call_args.args == (turn, [("CHOCKS_ON", now, {})])
     assert record_many.call_args.kwargs["request_id"] == "message:42:555"
-    context.bot.delete_message.assert_awaited_once_with(
-        chat_id=42, message_id=555
-    )
+    context.bot.delete_message.assert_awaited_once_with(chat_id=42, message_id=555)
 
 
 def test_station_statistics_only_use_manual_records_and_keep_critical_notes(tmp_path):
     store = GroundTurnStore(tmp_path / "ground.sqlite")
     now = datetime.now(UTC)
     turn = {
-        "key": "UAAA:o:123", "station": "UAAA",
-        "outbound_id": 123, "inbound_id": None,
-        "planned_out": now, "planned_in": None,
+        "key": "UAAA:o:123",
+        "station": "UAAA",
+        "outbound_id": 123,
+        "inbound_id": None,
+        "planned_out": now,
+        "planned_in": None,
     }
     store.observe({**turn, "actual_out": now})
     assert store.events(turn["key"]) == []
     store.record(
-        turn, "NOTE", actor_id=42, event_at=now,
+        turn,
+        "NOTE",
+        actor_id=42,
+        event_at=now,
         request_id="message:42:1",
         detail={"text": "Тележка зацепила крыло ВС", "critical": True},
     )
     store.record(
-        turn, "FUEL_STARTED", actor_id=42,
-        event_at=now - timedelta(minutes=35), request_id="message:42:2",
+        turn,
+        "FUEL_STARTED",
+        actor_id=42,
+        event_at=now - timedelta(minutes=35),
+        request_id="message:42:2",
     )
     store.record(
-        turn, "FUEL_COMPLETED", actor_id=42,
-        event_at=now - timedelta(minutes=10), request_id="message:42:3",
+        turn,
+        "FUEL_COMPLETED",
+        actor_id=42,
+        event_at=now - timedelta(minutes=10),
+        request_id="message:42:3",
     )
     report = store.station_report("UAAA")
     assert report["turns"] == 1
