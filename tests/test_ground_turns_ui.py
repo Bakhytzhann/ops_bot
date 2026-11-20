@@ -21,76 +21,78 @@ def _click(button):
 
 def _buttons(call):
     return [
-        button for row in call.kwargs["reply_markup"].inline_keyboard for button in row
+        button
+        for row in call.kwargs["reply_markup"].inline_keyboard
+        for button in row
     ]
 
 
 @pytest.mark.asyncio
-async def test_ground_list_and_inline_mark_share_the_leon_turn(monkeypatch):
+async def test_ground_card_only_offers_time_statistics_and_back(monkeypatch):
     now = datetime.now(UTC)
     active = {
         "key": "UACC:dep:123",
         "station": "UACC",
         "registration": "UP-ABC",
         "outbound_id": 123,
-        "outbound_number": "ACTIVE123",
+        "outbound_number": "ABC123",
         "status": "active",
         "reference_time": now,
     }
-    recent = {
-        **active,
-        "key": "UACC:dep:456",
-        "outbound_number": "RECENT456",
-        "status": "recent",
-    }
     load = AsyncMock(
         return_value={
-            "cards": [active, recent],
+            "cards": [active],
             "schedule_complete": True,
             "watch_complete": True,
             "fetched_at": now,
         }
     )
-    record = Mock(return_value=True)
     monkeypatch.setattr(ui, "load_ground_flights", load)
-    monkeypatch.setattr(ui, "station_remarks", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         ui,
         "ground_turns",
         SimpleNamespace(
             observe=Mock(),
-            baseline=Mock(return_value=None),
             events=Mock(return_value=[]),
             recent_outs=Mock(return_value={}),
-            record=record,
         ),
     )
     update = update_for("GROUND STATUS")
     context = SimpleNamespace(user_data={})
     await ui.show_ground_turns(update, context)
     home = _buttons(update.effective_message.reply_text.call_args)
-    assert any("ACTIVE123" in button.text for button in home)
-    assert not any("RECENT456" in button.text for button in home)
-
-    open_card = _click(next(button for button in home if "ACTIVE123" in button.text))
-    await ui.ground_turn_callback(open_card, context)
-    card = _buttons(open_card.callback_query.edit_message_text.call_args)
-    assert any(button.text == "↻ Статус" for button in card)
-
-    quick = _click(next(button for button in card if button.text == "Отметить этап"))
-    await ui.ground_turn_callback(quick, context)
-    mark = _click(
-        next(
-            button
-            for button in _buttons(quick.callback_query.edit_message_text.call_args)
-            if button.text == "Заправка начата"
-        )
+    opened = _click(next(button for button in home if "ABC123" in button.text))
+    await ui.ground_turn_callback(opened, context)
+    card = _buttons(opened.callback_query.edit_message_text.call_args)
+    assert [button.text for button in card] == [
+        "LT", "Статистика станции", "← К рейсам"
+    ]
+    assert "Пока нет ручных отметок" in (
+        opened.callback_query.edit_message_text.call_args.args[0]
     )
-    await ui.ground_turn_callback(mark, context)
-    assert record.call_args.args == (active, "FUEL_STARTED")
-    assert record.call_args.kwargs["request_id"] == "callback:callback-id"
-    assert record.call_args.kwargs["event_at"].tzinfo == UTC
+    assert context.user_data[ui.STATE_KEY]["current"] == 0
     load.assert_awaited_once_with(refresh=False)
+
+
+def test_latest_manual_correction_and_notes_are_visible():
+    when = datetime(2026, 11, 18, 12, 45, tzinfo=UTC)
+    events = [
+        {"id": 1, "kind": "LANDING", "event_at": when,
+         "source": "telegram", "detail": {}},
+        {"id": 2, "kind": "LANDING", "event_at": when.replace(minute=48),
+         "source": "telegram", "detail": {}},
+        {"id": 3, "kind": "NOTE", "event_at": when,
+         "source": "telegram", "detail": {"text": "ТЗ прибыл поздно"}},
+    ]
+    turn = {
+        "station": "UAAA", "registration": "UP-ABC",
+        "inbound_id": 1, "inbound_number": "ABC123",
+    }
+    card = ui._card_text(turn, events)
+    assert "12:48Z" in card
+    assert "12:45Z" not in card
+    assert "ТЗ прибыл поздно" in card
+    assert "DEPARTURE" not in card
 
 
 def test_ground_manual_utc_time_crosses_midnight_without_guessing_future_actuals():
