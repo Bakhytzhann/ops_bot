@@ -36,7 +36,8 @@ async def load_flight_snapshot(
             lambda: get_flight_schedule(day),
         )
         matches = [
-            f for f in schedule["flights"]
+            f
+            for f in schedule["flights"]
             if f.get("flightNid") == selected.get("flightNid")
         ]
         if len(matches) != 1:
@@ -86,7 +87,8 @@ async def load_flight_snapshot(
                 "hotels": [
                     {
                         "position": member["position"].get("name", "Crew")
-                        if isinstance(member.get("position"), dict) else "Crew",
+                        if isinstance(member.get("position"), dict)
+                        else "Crew",
                         "name": (member.get("hotel") or {}).get("name"),
                     }
                     for member in assigned_members(crew["crew"], flight["flightNid"])
@@ -104,7 +106,7 @@ async def load_flight_snapshot(
                         and isinstance(member["login"].get("code"), str)
                         and member["login"]["code"].strip()
                     )
-                )
+                ),
             },
         )
         if fetched_at := utc(crew.get("fetched_at")):
