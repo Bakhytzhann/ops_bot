@@ -6,7 +6,7 @@ from config.settings import settings
 from integrations.leon.tools import get_flight_crew, get_flight_schedule
 from services.crew_format import format_flight_crew
 from services.flight_duty import assigned_members, load_duty
-from services.flight_foreflight import load_foreflight
+from services.flight_foreflight_fast import load_fast_foreflight
 from services.flight_summary import render_card
 from services.flight_weather import alternate_reports, station_roles
 from services.operational_routes import selected_flight_weather
@@ -101,9 +101,9 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
 
     async def weather():
         result = await cached(
-            ("weather", *version),
+            ("weather_current", *version),
             settings.snapshot_weather_ttl,
-            lambda: selected_flight_weather(flight, day, include_taf=True),
+            lambda: selected_flight_weather(flight, day, include_taf=False),
         )
         snapshot.blocks["weather"] = SourceBlock(
             "Leon / AWC",
@@ -111,7 +111,7 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
             if "reports" in result
             else result["answer"],
             "partial" if result.get("partial") else "ready",
-            details={"include_taf": True, "reports": list(result.get("reports", []))},
+            details={"include_taf": False, "reports": list(result.get("reports", []))},
         )
         if fetched_at := utc(result.get("fetched_at")):
             snapshot.blocks["weather"].fetched_at = fetched_at
@@ -119,9 +119,9 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
     async def foreflight():
         snapshot.blocks.update(
             await cached(
-                ("foreflight", *version),
+                ("foreflight_api", *version),
                 settings.snapshot_briefing_ttl,
-                lambda: load_foreflight(flight, snapshot.blocks),
+                lambda: load_fast_foreflight(flight),
             )
         )
 
@@ -158,35 +158,6 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
         section("weather", weather),
         section("foreflight", foreflight),
     )
-    additional = [
-        code
-        for code in station_roles(snapshot)
-        if code not in {flight.get("departure"), flight.get("arrival")}
-    ]
-    if additional:
-        try:
-            extra = await asyncio.wait_for(
-                cached(
-                    ("alternate_weather", *additional),
-                    settings.snapshot_weather_ttl,
-                    lambda: alternate_reports(additional),
-                ),
-                timeout=settings.snapshot_timeout,
-            )
-            block = snapshot.blocks.setdefault(
-                "weather",
-                SourceBlock("AWC", details={"include_taf": True, "reports": []}),
-            )
-            block.details["reports"] = [
-                *block.details.get("reports", []),
-                *extra["reports"],
-            ]
-            block.text = format_reports(block.details["reports"], extra["errors"])
-            if extra["errors"] or block.status != "ready":
-                block.status = "partial"
-            await emit()
-        except (TimeoutError, OSError):
-            pass
     snapshot.blocks.setdefault(
         "duty", SourceBlock("Leon", "Duty / Rest: нет данных экипажа.")
     )
@@ -195,9 +166,7 @@ async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
     )
     snapshot.blocks.setdefault(
         "notams",
-        SourceBlock(
-            "ForeFlight briefing", "NOTAM: нет данных; количество не определено."
-        ),
+        SourceBlock("ForeFlight briefing", "NOTAM: открыть «Подготовка» для загрузки."),
     )
     if not schedule.get("complete", True):
         snapshot.blocks["schedule"] = SourceBlock(
