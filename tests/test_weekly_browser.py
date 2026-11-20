@@ -343,3 +343,40 @@ async def test_ai_does_not_block_back_navigation_or_overwrite_new_screen(
     analyze.assert_not_awaited()
     ai.callback_query.edit_message_text.assert_not_awaited()
     back.callback_query.edit_message_text.assert_awaited_once()
+
+
+
+@pytest.mark.asyncio
+async def test_number_from_sked_opens_exact_flight_without_inline_flight_button(
+    context, identity, monkeypatch
+):
+    rows = [flight(101, "ABC101"), flight(202, "ABC202")]
+    monkeypatch.setattr(
+        browser,
+        "get_flight_schedule",
+        AsyncMock(return_value={"flights": rows, "complete": True}),
+    )
+    shown = update()
+    await browser.show_week(shown, context, today=date(2026, 11, 11))
+    typed = update(text="2")
+    assert browser.accepts_sked_number(typed, context)
+    snapshot = FlightSnapshot(rows[1])
+    loader = AsyncMock(return_value=snapshot)
+    monkeypatch.setattr(browser, "load_flight_snapshot", loader)
+    await browser.select_sked_number(typed, context)
+    loader.assert_awaited_once()
+    assert loader.call_args.args == (rows[1],)
+    assert loader.call_args.kwargs["from_sked"] is True
+    assert "ABC202" in typed.effective_message.reply_text.call_args.args[0]
+    assert context.user_data["flight_navigation"][(42, None)]["selected_flight_id"] == 202
+    assert not browser.accepts_sked_number(update(text="hello"), context)
+
+
+@pytest.mark.asyncio
+async def test_seven_day_navigation_keeps_same_combined_view(context, identity, monkeypatch):
+    schedule = AsyncMock(return_value={"flights": [], "complete": True})
+    monkeypatch.setattr(browser, "get_flight_schedule", schedule)
+    await browser.show_week(update(), context, today=date(2026, 12, 29))
+    token = context.user_data["active_sked"][(42, None)]
+    await browser.handle_selection(update(data=f"sk:{token}:next"), context)
+    schedule.assert_awaited_with("2027-01-05", "2027-01-11")
