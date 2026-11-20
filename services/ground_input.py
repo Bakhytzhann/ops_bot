@@ -2,6 +2,7 @@
 
 Qwen only classifies text. Python validates UTC times, flights and database writes.
 """
+
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -13,12 +14,26 @@ class GroundModelUnavailable(RuntimeError):
 
 
 KINDS = {
-    "LANDING", "IN_BLOCK", "CHOCKS_ON", "CHOCKS_OFF",
-    "PAX_OFF_STARTED", "PAX_OFF_COMPLETED",
-    "FUEL_REQUESTED", "FUEL_TRUCK_ARRIVED", "FUEL_STARTED", "FUEL_COMPLETED",
-    "CABIN_READY", "HANDLING_READY", "DOCUMENTS_READY",
-    "BOARDING_STARTED", "BOARDING_COMPLETED", "PAX_ON_BOARD",
-    "REPORTED_READY", "OUT_BLOCK", "TAKEOFF", "NOTE",
+    "LANDING",
+    "IN_BLOCK",
+    "CHOCKS_ON",
+    "CHOCKS_OFF",
+    "PAX_OFF_STARTED",
+    "PAX_OFF_COMPLETED",
+    "FUEL_REQUESTED",
+    "FUEL_TRUCK_ARRIVED",
+    "FUEL_STARTED",
+    "FUEL_COMPLETED",
+    "CABIN_READY",
+    "HANDLING_READY",
+    "DOCUMENTS_READY",
+    "BOARDING_STARTED",
+    "BOARDING_COMPLETED",
+    "PAX_ON_BOARD",
+    "REPORTED_READY",
+    "OUT_BLOCK",
+    "TAKEOFF",
+    "NOTE",
 }
 INTERVALS = {
     "FUEL": ("FUEL_STARTED", "FUEL_COMPLETED"),
@@ -87,7 +102,9 @@ def _time_in_input(value, source):
     digits = value.replace(":", "")
     if not re.fullmatch(r"\d{4}", digits):
         return False
-    candidates = re.findall(r"(?<!\d)(?:[01]\d|2[0-3]):[0-5]\d(?!\d)|(?<!\d)\d{4}(?!\d)", source)
+    candidates = re.findall(
+        r"(?<!\d)(?:[01]\d|2[0-3]):[0-5]\d(?!\d)|(?<!\d)\d{4}(?!\d)", source
+    )
     return digits in {part.replace(":", "") for part in candidates}
 
 
@@ -96,10 +113,13 @@ async def parse_ground_input(text, scope, *, now=None):
         raise ValueError("Введите короткую вводную до 600 символов.")
     now = now or datetime.now(UTC)
     from services.ai_analysis import AnalysisUnavailable, request_analysis
+
     try:
         parsed = await request_analysis(
-        {"input": text}, ("ground_input", scope),
-        system_prompt=PROMPT, response_model=GroundInput,
+            {"input": text},
+            ("ground_input", scope),
+            system_prompt=PROMPT,
+            response_model=GroundInput,
         )
     except AnalysisUnavailable as exc:
         raise GroundModelUnavailable(str(exc)) from exc
@@ -107,13 +127,21 @@ async def parse_ground_input(text, scope, *, now=None):
         raise ValueError("Не удалось определить событие. Уточните вводную.")
     if parsed.flight and not re.fullmatch(r"[A-Za-z0-9 -]{2,20}", parsed.flight):
         raise ValueError("Неверный номер рейса.")
-    if any(not _time_in_input(value, text) for value in (parsed.start, parsed.end) if value):
+    if any(
+        not _time_in_input(value, text) for value in (parsed.start, parsed.end) if value
+    ):
         raise ValueError("Время не найдено в вашей вводной. Уточните отметку.")
     records = []
     if parsed.kind == "NOTE":
         if parsed.start or parsed.end:
             raise ValueError("Уточните, к какому этапу относится время.")
-        records.append(("NOTE", now, {"text": parsed.note or text.strip(), "critical": parsed.critical}))
+        records.append(
+            (
+                "NOTE",
+                now,
+                {"text": parsed.note or text.strip(), "critical": parsed.critical},
+            )
+        )
     elif parsed.kind in INTERVALS:
         if not parsed.start or not parsed.end:
             raise ValueError("Укажите начало и конец через /, например 1310/1345.")
@@ -122,7 +150,9 @@ async def parse_ground_input(text, scope, *, now=None):
         if ending <= beginning and not re.match(r"\d{4}-", parsed.end):
             ending += timedelta(days=1)
         if ending <= beginning or ending > now:
-            raise ValueError("Проверьте интервал: конец должен быть позже начала и не в будущем.")
+            raise ValueError(
+                "Проверьте интервал: конец должен быть позже начала и не в будущем."
+            )
         first, last = INTERVALS[parsed.kind]
         records.extend(((first, beginning, {}), (last, ending, {})))
     else:
@@ -130,5 +160,7 @@ async def parse_ground_input(text, scope, *, now=None):
             raise ValueError("Укажите одно время UTC, например «колодки 1251Z».")
         records.append((parsed.kind, _event_time(parsed.start, now), {}))
     if parsed.note and parsed.kind != "NOTE":
-        records.append(("NOTE", now, {"text": parsed.note, "critical": parsed.critical}))
+        records.append(
+            ("NOTE", now, {"text": parsed.note, "critical": parsed.critical})
+        )
     return parsed.flight.strip().upper(), records
