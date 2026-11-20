@@ -1,6 +1,7 @@
 """Compact Flight Card from source fields; detailed bulletins remain unchanged."""
 
 import json
+import re
 from pathlib import Path
 
 from services.flight_display import flight_date, flight_stamp, flight_time
@@ -10,6 +11,7 @@ from services.flight_weather import (
     station_roles,
 )
 from services.foreflight_operations import duration
+from services.flight_weather_brief import CAT_I_REFERENCE, concise_weather
 from services.notam_filters import notam_sets
 
 _COUNTRY_CODES = {
@@ -124,19 +126,39 @@ def render_card(snapshot, preferences=None):
         )
         if part
     )
-    second = "Расчетное " + eet_summary(snapshot.blocks.get("flighttime"))
-    crew = snapshot.blocks.get("crew")
-    codes = crew.details.get("codes", []) if crew else []
-    if codes:
-        second += " · CREW " + "/".join(codes)
-    lines = [first + "\n" + second]
+    lines = [first]
     if flight.get("cancelled"):
         lines.append("ОТМЕНЁН")
-    lines.extend(
-        [
-            wx_summary(snapshot, preferences),
-            route_summary(snapshot, preferences),
-            notam_summary(snapshot, preferences),
+    lines.append("ETE " + eet_summary(snapshot.blocks.get("flighttime")))
+
+    crew = snapshot.blocks.get("crew")
+    duty = snapshot.blocks.get("duty")
+    codes = crew.details.get("codes", []) if crew else []
+    crew_line = "CREW " + ("/".join(codes) if codes else "нет данных")
+    lines.append(crew_line)
+
+    if duty and duty.text:
+        summary = duty.details.get("summary", "")
+        compact = [
+            part.strip()
+            for part in summary.splitlines()
+            if any(key in part for key in ("Duty по графику", "Reporting duty interval", "Rest Before"))
         ]
-    )
+        if compact:
+            lines.append("DUTY / REST · " + " | ".join(compact[:4]))
+        fdp_lines = [
+            line.strip()
+            for line in duty.text.splitlines()
+            if re.match(r"^(FDP:|nextEOBT:|Rest Before:|Rest After:)", line.strip())
+        ]
+        if fdp_lines:
+            lines.append("FDP / NEXT EOBT · " + " | ".join(fdp_lines[:8]))
+    else:
+        lines.append("FDP / NEXT EOBT · загружается / нет данных")
+    lines.append("HOTEL · нет подтверждённых данных")
+
+    lines.append(concise_weather(snapshot, preferences))
+    lines.append(route_summary(snapshot, preferences))
+    lines.append("NOTAM · Подготовка (по запросу)")
+    lines.append(CAT_I_REFERENCE)
     return "\n\n".join(line for line in lines if line)
