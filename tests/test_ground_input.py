@@ -121,3 +121,9 @@ def test_station_statistics_only_use_manual_records_and_keep_critical_notes(tmp_
     assert report["note_count"] == 1
     assert report["critical_count"] == 1
     assert report["metrics"]["Заправка"]["mean_minutes"] == 25
+
+
+def test_model_cannot_invent_times_absent_from_operator_text():
+    assert ground_input._time_in_input("13:10", "заправка 1310/1345")
+    assert ground_input._time_in_input("1345Z", "заправка 1310/1345")
+    assert not ground_input._time_in_input("12:45", "ТЗ приехал поздно")
