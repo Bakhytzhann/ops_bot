@@ -7,6 +7,7 @@ from integrations.leon.tools import get_flight_crew, get_flight_schedule
 from services.crew_format import format_flight_crew
 from services.flight_duty import assigned_members, load_duty
 from services.flight_foreflight_fast import load_fast_foreflight
+from services.flight_handlers import load_flight_handlers
 from services.flight_summary import render_card
 from services.operational_routes import selected_flight_weather
 from services.snapshot_models import FlightSnapshot, SourceBlock, utc, zulu
@@ -135,6 +136,13 @@ async def load_flight_snapshot(
         if fetched_at := utc(result.get("fetched_at")):
             snapshot.blocks["weather"].fetched_at = fetched_at
 
+    async def handlers():
+        snapshot.blocks["handlers"] = await cached(
+            ("handlers", *version),
+            settings.snapshot_crew_ttl,
+            lambda: load_flight_handlers(flight),
+        )
+
     async def foreflight():
         snapshot.blocks.update(
             await cached(
@@ -148,7 +156,7 @@ async def load_flight_snapshot(
         try:
             await asyncio.wait_for(loader(), timeout=settings.snapshot_timeout)
         except Exception as exc:  # noqa: BLE001 -- source boundary; no payloads/URLs
-            label = {"crew": "Экипаж", "weather": "Погода", "foreflight": "ForeFlight"}[
+            label = {"crew": "Экипаж", "weather": "Погода", "foreflight": "ForeFlight", "handlers": "Handling"}[
                 name
             ]
             snapshot.blocks.setdefault(
@@ -176,6 +184,7 @@ async def load_flight_snapshot(
         section("crew", crew_and_duty),
         section("weather", weather),
         section("foreflight", foreflight),
+        section("handlers", handlers),
     )
     snapshot.blocks.setdefault(
         "duty", SourceBlock("Leon", "Duty / Rest: нет данных экипажа.")
