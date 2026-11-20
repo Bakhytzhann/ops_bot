@@ -34,14 +34,14 @@ def test_briefing_is_only_available_within_preparation(card):
     url = "https://docs.example.test/briefing?signature=test"
     card.blocks["briefing"] = SourceBlock("ForeFlight", details={"url": url})
     main = browser.card_keyboard(card, "token", 0)
-    assert not any(
-        button.url for row in main.inline_keyboard for button in row
-    )
+    assert not any(button.url for row in main.inline_keyboard for button in row)
     prep = browser.card_keyboard(card, "token", 0, action="prep")
     assert any(
         button.callback_data == "fc:token:0:prepbriefing:0"
-        for row in prep.inline_keyboard for button in row
+        for row in prep.inline_keyboard
+        for button in row
     )
+
 
 
 @pytest.mark.asyncio
@@ -93,12 +93,15 @@ async def test_briefing_is_loaded_only_after_preparation_click(card, monkeypatch
     context = SimpleNamespace(
         bot_data={"weekly_flight_lists": {"token": listing}}, user_data={}
     )
-    load = AsyncMock(return_value={
-        "briefing": SourceBlock(
-            "ForeFlight", "Briefing",
-            details={"url": "https://example.test/test.pdf"},
-        )
-    })
+    load = AsyncMock(
+        return_value={
+            "briefing": SourceBlock(
+                "ForeFlight",
+                "Briefing",
+                details={"url": "https://example.test/test.pdf"},
+            )
+        }
+    )
     monkeypatch.setattr(flight_foreflight, "load_foreflight", load)
     prepare = update(data="fc:token:0:prep:0")
     await bot.handle_button(prepare, context)
@@ -111,5 +114,6 @@ async def test_briefing_is_loaded_only_after_preparation_click(card, monkeypatch
     markup = event.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
     assert any(
         button.url == "https://example.test/test.pdf"
-        for row in markup.inline_keyboard for button in row
+        for row in markup.inline_keyboard
+        for button in row
     )
