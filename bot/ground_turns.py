@@ -350,6 +350,16 @@ async def _show_station_stats(update, state, index):
             lines.append(f"{label}: {metric['mean_minutes']:g} мин (n={metric['count']})")
     if lines[-1] == "СРЕДНИЕ ВРЕМЕНА":
         lines.append("Пока недостаточно завершённых интервалов.")
+    most_common = sorted(
+        report.get("event_counts", {}).items(),
+        key=lambda item: -item[1],
+    )[:5]
+    if most_common:
+        lines.extend(("", "ЧАСТЫЕ ЭТАПЫ"))
+        lines.extend(
+            f"{EVENTS.get(kind, kind)}: {count} рейс(ов)"
+            for kind, count in most_common
+        )
     lines.extend(("", "ПРОБЛЕМЫ И РИСКИ"))
     try:
         result = await interpret_station(report)
