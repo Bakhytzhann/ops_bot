@@ -37,18 +37,18 @@ from bot.commands import (
 from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
 from bot.flight_browser import (
     accepts_sked_number,
-    select_sked_number,
     handle_selection,
     invalidate_screen,
     is_card_notice_callback,
+    select_sked_number,
     show_week,
 )
 from bot.ground_turns import (
     clear_ground_turn_input,
     deactivate_ground,
     ground_text_accepted,
-    handle_ground_text,
     ground_turn_callback,
+    handle_ground_text,
     handle_ground_turn_input,
     has_ground_turn_input,
     show_ground_turns,
