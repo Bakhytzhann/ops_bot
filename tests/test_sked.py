@@ -102,7 +102,7 @@ async def test_session_toggles_survive_card_details_and_back(
         markup = u.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
         assert any(
             b.callback_data
-            == "wk:token:0"
+            == ("fc:token:0:card:0" if action == "notams" else "wk:token:0")
             for row in markup.inline_keyboard
             for b in row
         )
