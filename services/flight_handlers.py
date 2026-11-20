@@ -49,7 +49,11 @@ def _directory_rows(response):
 
 
 def _same_name(a, b):
-    return bool(a and b and re.sub(r"\s+", " ", a).casefold() == re.sub(r"\s+", " ", b).casefold())
+    return bool(
+        a
+        and b
+        and re.sub(r"\s+", " ", a).casefold() == re.sub(r"\s+", " ", b).casefold()
+    )
 
 
 def _match(directory, assigned):
@@ -71,12 +75,16 @@ async def load_flight_handlers(flight):
         raise ValueError("Leon flightNid missing")
     payload = await call_leon("get-flights-by-flight-nids", {"flightNids": [nid]})
     if isinstance(payload, dict):
-        payload = payload.get("flightList", payload.get("flightsList", payload.get("result", payload)))
+        payload = payload.get(
+            "flightList", payload.get("flightsList", payload.get("result", payload))
+        )
     if isinstance(payload, dict) and payload.get("flightNid") == nid:
         payload = [payload]
     if not isinstance(payload, list):
         raise TypeError("Leon flight detail response unavailable")
-    matched = [row for row in payload if isinstance(row, dict) and row.get("flightNid") == nid]
+    matched = [
+        row for row in payload if isinstance(row, dict) and row.get("flightNid") == nid
+    ]
     if len(matched) != 1:
         raise ValueError("Leon flight detail mismatch")
     row = matched[0]
@@ -85,7 +93,11 @@ async def load_flight_handlers(flight):
     async def enrich(role):
         agent = assigned[role]
         station = flight.get(role)
-        if not agent or not isinstance(station, str) or not re.fullmatch(r"[A-Z]{4}", station):
+        if (
+            not agent
+            or not isinstance(station, str)
+            or not re.fullmatch(r"[A-Z]{4}", station)
+        ):
             return None
         try:
             entries = _directory_rows(
@@ -104,9 +116,7 @@ async def load_flight_handlers(flight):
             "email": _text(match.get("email")) if match else "",
         }
 
-    outbound, inbound = await asyncio.gather(
-        enrich("departure"), enrich("arrival")
-    )
+    outbound, inbound = await asyncio.gather(enrich("departure"), enrich("arrival"))
     return SourceBlock(
         "Leon",
         "Handling assigned by flight",
@@ -132,4 +142,8 @@ def format_handlers(block, flight, preferences=None):
         if info.get("email"):
             parts.append(info["email"])
         lines.append(" · ".join(parts))
-    return "HANDLING\n" + "\n".join(lines) if lines else "HANDLING · не назначен / нет данных"
+    return (
+        "HANDLING\n" + "\n".join(lines)
+        if lines
+        else "HANDLING · не назначен / нет данных"
+    )
