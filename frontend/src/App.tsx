@@ -1,9 +1,9 @@
-import { CalendarDays, ChevronLeft, Minus, PlaneTakeoff, Plus } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
-import type { Flight, OpsApi } from './api'
+import { CalendarDays, ChevronLeft, PlaneTakeoff, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Display, Flight, Handling, OpsApi, Plan, Selection } from './api'
 import { Badge, Button } from './components/ui'
-import { Preparation } from './Preparation'
-import { Resource, utcDate, utcTime } from './presentation'
+import { CrewPanel, HotelPanel, Preparation, WeatherPanel } from './Preparation'
+import { flightAirport, flightTime, PanelHeader, Resource, StatusBadge, utcDate, utcTime } from './presentation'
 
 export interface AppHost {
   bindBack?: (handler: () => void) => () => void
@@ -13,7 +13,7 @@ export interface AppHost {
 const dateFormat = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', day: '2-digit', month: 'short', year: 'numeric',
 })
-const noData = '—'
+const unknown = 'NOT VERIFIED'
 
 function dayOffset(day: string, offset: number) {
   const date = new Date(day + 'T00:00:00Z')
@@ -21,7 +21,9 @@ function dayOffset(day: string, offset: number) {
   return utcDate(date.toISOString())
 }
 
-function Header({ title, back }: { title: string; back?: () => void }) {
+function Header({ title, back, mode, toggleMode }: {
+  title: string; back?: () => void; mode?: Display; toggleMode?: () => void
+}) {
   return (
     <header className="screen-header">
       <div className="flex min-w-0 items-center gap-3">
@@ -35,7 +37,11 @@ function Header({ title, back }: { title: string; back?: () => void }) {
           <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
         </div>
       </div>
-      <Badge variant="accent">UTC / ICAO</Badge>
+      {toggleMode && (
+        <Button variant="outline" onClick={toggleMode} className="font-mono text-xs" aria-label="Switch time and airport code display">
+          {mode === 'LT' ? 'LT · IATA' : 'UTC · ICAO'}
+        </Button>
+      )}
     </header>
   )
 }
@@ -52,14 +58,16 @@ export function OpenInTelegram() {
   )
 }
 
-type Screen = { view: 'sked' } | { view: 'card' | 'prep'; flight: Flight }
+type Screen = { view: 'sked' } | { view: 'card' | 'prep'; selection: Selection }
 
 export function App({ api, host }: { api: OpsApi; host: AppHost }) {
-  const [day, setDay] = useState(() => utcDate(new Date().toISOString()))
+  const [mode, setMode] = useState<Display>('UTC')
+  const [week, setWeek] = useState(() => utcDate(new Date().toISOString()))
+  const [day, setDay] = useState<string>()
   const [screen, setScreen] = useState<Screen>({ view: 'sked' })
   const back = useCallback(() => {
     setScreen((current) => current.view === 'prep'
-      ? { view: 'card', flight: current.flight }
+      ? { view: 'card', selection: current.selection }
       : { view: 'sked' })
   }, [])
   const view = screen.view
@@ -73,14 +81,17 @@ export function App({ api, host }: { api: OpsApi; host: AppHost }) {
       <Header
         title={view === 'sked' ? 'SKED' : view === 'card' ? 'Flight Card' : 'Preparation'}
         back={view !== 'sked' && !host.bindBack ? back : undefined}
+        mode={mode} toggleMode={() => setMode((value) => value === 'UTC' ? 'LT' : 'UTC')}
       />
       <div className="screen-content">
         {screen.view === 'sked' ? (
-          <Schedule api={api} day={day} onDay={setDay} onFlight={(flight) => setScreen({ view: 'card', flight })} />
+          <Schedule api={api} mode={mode} week={week} day={day} onWeek={setWeek} onDay={setDay}
+            onFlight={(flight) => setScreen({ view: 'card', selection: { week, flight } })} />
         ) : screen.view === 'card' ? (
-          <Card api={api} day={day} flight={screen.flight} onPrepare={(flight) => setScreen({ view: 'prep', flight })} />
+          <Card api={api} mode={mode} selection={screen.selection}
+            onPrepare={() => setScreen({ view: 'prep', selection: screen.selection })} />
         ) : (
-          <Preparation api={api} day={day} flight={screen.flight} openLink={host.openLink} />
+          <Preparation api={api} mode={mode} selection={screen.selection} openLink={host.openLink} />
         )}
       </div>
     </main>
@@ -88,93 +99,117 @@ export function App({ api, host }: { api: OpsApi; host: AppHost }) {
 }
 
 function Schedule({
-  api, day, onDay, onFlight,
+  api, mode, week, day, onWeek, onDay, onFlight,
 }: {
-  api: OpsApi
-  day: string
-  onDay: (day: string) => void
-  onFlight: (flight: Flight) => void
+  api: OpsApi; mode: Display; week: string; day?: string;
+  onWeek: (day: string) => void; onDay: (day?: string) => void; onFlight: (flight: Flight) => void
 }) {
-  const load = useCallback((signal: AbortSignal) => api.schedule(day, signal), [api, day])
-  const today = utcDate(new Date().toISOString())
+  const end = dayOffset(week, 6)
+  const load = useCallback((signal: AbortSignal, refresh?: boolean) =>
+    api.schedule(week, end, signal, refresh),
+  [api, week, end])
+  function shift(days: number) {
+    onWeek(dayOffset(week, days))
+    onDay()
+  }
+  function select(value: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return
+    if (value < week || value > end) onWeek(value)
+    onDay(value)
+  }
   return (
     <>
+      <div className="week-controls flex items-center justify-between gap-2">
+        <Button variant="outline" onClick={() => shift(-7)} aria-label="Previous seven days" className="font-mono text-xs">← 7 DAYS</Button>
+        <span className="caption text-center">{week.slice(5)} / {end.slice(5)} UTC</span>
+        <Button variant="outline" onClick={() => shift(7)} aria-label="Next seven days" className="font-mono text-xs">7 DAYS →</Button>
+      </div>
       <div className="date-bar">
-        <Button variant="outline" size="icon" onClick={() => onDay(dayOffset(day, -1))} aria-label="Previous day">
-          <Minus size={17} />
-        </Button>
         <label className="date-control">
           <CalendarDays size={17} aria-hidden="true" />
-          <span>{dateFormat.format(new Date(day + 'T00:00:00Z'))}</span>
-          <input aria-label="Schedule date (UTC)" type="date" value={day}
-            onChange={(event) => { if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) onDay(event.target.value) }} />
+          <span>{day ? dateFormat.format(new Date(day + 'T00:00:00Z')) : 'Select UTC date'}</span>
+          <input aria-label="Schedule date (UTC)" type="date" value={day ?? week} onChange={(event) => select(event.target.value)} />
         </label>
-        <Button variant="outline" size="icon" onClick={() => onDay(dayOffset(day, 1))} aria-label="Next day">
-          <Plus size={17} />
-        </Button>
-        {today !== day && <Button variant="ghost" onClick={() => onDay(today)}>Today</Button>}
+        {day && <Button variant="ghost" onClick={() => onDay()}>All 7 days</Button>}
       </div>
       <Resource load={load} label="SKED">
-        {(data) => (
-          <section className="ops-panel" aria-label="Scheduled flights">
-            <div className="panel-bar">
-              <span>{data.flights.length} {data.flights.length === 1 ? 'leg' : 'legs'}</span>
-              <Badge variant={data.complete ? 'default' : 'warning'}>{data.complete ? 'Leon' : 'Leon · Partial'}</Badge>
-            </div>
-            {data.flights.length === 0 ? (
-              <p className="px-3 py-5 text-sm text-muted-foreground">
-                {data.complete ? 'No flights scheduled.' : 'No flights in the partial schedule.'}
-              </p>
-            ) : (
-              <>
-                <div className="strip strip-head" aria-hidden="true"><span>STD</span><span>Flight</span><span>ADEP / ADES</span></div>
-                <ul className="divide-y divide-border">
-                  {data.flights.map((flight) => (
-                    <li key={flight.id}>
-                      <button className="strip strip-flight" onClick={() => onFlight(flight)}>
-                        <time dateTime={flight.std} className="font-mono text-primary">{utcTime(flight.std)}</time>
-                        <span className="flex min-w-0 flex-col items-start">
-                          <strong className="wrap-anywhere">{flight.number ?? noData}</strong>
-                          <span className="minor">{flight.aircraft ?? noData}</span>
-                        </span>
-                        <span className="flex min-w-0 flex-col items-start">
-                          <strong className="font-mono">{flight.departure ?? noData} / {flight.arrival ?? noData}</strong>
-                          {flight.cancelled
-                            ? <Badge variant="warning">Cancelled</Badge>
-                            : flight.ferry && <Badge>Ferry</Badge>}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </section>
-        )}
+        {(data, refresh, refreshing) => {
+          const visible = data.flights.map((flight, index) => ({ flight, number: index + 1 }))
+            .filter(({ flight }) => !day || flight.std.slice(0, 10) === day)
+          return (
+            <section className="ops-panel" aria-label="Scheduled flights">
+              <div className="panel-bar">
+                <div><span>{visible.length} {visible.length === 1 ? 'leg' : 'legs'}</span>
+                  <p className="minor">Leon{data.fetched_at && ' · ' + utcTime(data.fetched_at)}</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <StatusBadge status={data.status} until={data.fresh_until} />
+                  <Button size="icon" variant="ghost" onClick={refresh} disabled={refreshing} aria-label="Refresh SKED"><RefreshCw size={16} /></Button>
+                </div>
+              </div>
+              {!visible.length ? (
+                <p className="px-3 py-5 text-sm text-muted-foreground">
+                  {data.complete ? 'No flights scheduled.' : 'No flights in the partial schedule.'}
+                </p>
+              ) : (
+                <>
+                  <div className="strip strip-head" aria-hidden="true"><span>STD / STA</span><span>Flight / REG</span><span>DEP / ARR</span></div>
+                  <ul className="divide-y divide-border">
+                    {visible.map(({ flight, number }, index) => {
+                      const utcDay = flight.std.slice(0, 10)
+                      const showDay = !day && (index === 0 || visible[index - 1].flight.std.slice(0, 10) !== utcDay)
+                      return <li key={flight.id}>
+                        {showDay && <h2 className="border-b border-border px-3 py-1 caption">{dateFormat.format(new Date(flight.std))} UTC</h2>}
+                        <button className="strip strip-flight" onClick={() => onFlight(flight)}>
+                          <span className="flex flex-col font-mono text-xs">
+                            <span className="text-primary">{flightTime(flight, 'std', mode)}</span>
+                            <span className="text-muted-foreground">{flightTime(flight, 'sta', mode)}</span>
+                          </span>
+                          <span className="flex min-w-0 flex-col items-start">
+                            <strong className="wrap-anywhere"><span className="minor">#{number}</span> {flight.number ?? unknown}</strong>
+                            <span className="minor">{flight.aircraft ?? unknown}</span>
+                          </span>
+                          <span className="flex min-w-0 flex-col items-start">
+                            <strong className="font-mono wrap-anywhere">{flightAirport(flight, 'departure', mode)} / {flightAirport(flight, 'arrival', mode)}</strong>
+                            {flight.cancelled && <Badge variant="warning">Cancelled</Badge>}
+                            {flight.ferry && <Badge>Ferry</Badge>}
+                          </span>
+                        </button>
+                      </li>
+                    })}
+                  </ul>
+                </>
+              )}
+            </section>
+          )
+        }}
       </Resource>
     </>
   )
 }
 
-function FlightLeg({ flight }: { flight: Flight }) {
+function FlightLeg({ flight, mode }: { flight: Flight; mode: Display }) {
+  const day = (mode === 'LT' ? flight.std_local : flight.std)?.slice(0, 10)
   return (
     <section className="ops-panel">
-      <div className="panel-bar">
-        <span>{flight.number ?? noData} <span className="ml-1 text-muted-foreground">{flight.aircraft ?? noData}{flight.aircraft_type ? ' / ' + flight.aircraft_type : ''}</span></span>
-        {flight.cancelled
-          ? <Badge variant="warning">Cancelled</Badge>
-          : <Badge>{dateFormat.format(new Date(flight.std))}</Badge>}
+      <div className="panel-bar flex-wrap">
+        <span>{flight.number ?? unknown} <span className="ml-1 text-muted-foreground">{flight.aircraft ?? unknown}{flight.aircraft_type ? ' / ' + flight.aircraft_type : ''}</span></span>
+        <div className="flex flex-wrap gap-1">
+          {flight.cancelled && <Badge variant="warning">Cancelled</Badge>}
+          {flight.ferry && <Badge>Ferry</Badge>}
+          <Badge>{day ? dateFormat.format(new Date(day + 'T00:00:00Z')) + ' ' + mode : unknown}</Badge>
+        </div>
       </div>
       <dl className="grid grid-cols-2 divide-x divide-border">
         {([
-          ['ADEP', flight.departure, 'STD', flight.std],
-          ['ADES', flight.arrival, 'STA', flight.sta],
-        ] as const).map(([station, airport, time, value]) => (
-          <div key={station} className="space-y-1.5 p-3">
+          ['DEP', 'departure', 'STD', 'std'],
+          ['ARR', 'arrival', 'STA', 'sta'],
+        ] as const).map(([station, side, title, field]) => (
+          <div key={station} className="min-w-0 space-y-1 p-3">
             <dt className="caption">{station}</dt>
-            <dd className="font-mono text-2xl font-semibold">{airport ?? noData}</dd>
-            <dt className="caption">{time}</dt>
-            <dd className="font-mono text-sm text-primary">{value && utcDate(value) !== utcDate(flight.std) ? dateFormat.format(new Date(value)) + ' ' : ''}{utcTime(value)}</dd>
+            <dd className="font-mono text-xl font-semibold wrap-anywhere">{flightAirport(flight, side, mode)}</dd>
+            <dt className="caption">{title}</dt>
+            <dd className="font-mono text-sm text-primary">{flightTime(flight, field, mode)}</dd>
           </div>
         ))}
       </dl>
@@ -182,49 +217,94 @@ function FlightLeg({ flight }: { flight: Flight }) {
   )
 }
 
-function Card({
-  api, day, flight, onPrepare,
-}: { api: OpsApi; day: string; flight: Flight; onPrepare: (flight: Flight) => void }) {
-  const load = useCallback((signal: AbortSignal) => api.card(flight.id, day, signal), [api, day, flight.id])
+function PlanPanel({ data, mode }: { data: Plan; mode: Display }) {
+  const ete = data.ete_minutes
   return (
-    <Resource load={load} label="flight plan and handling" pending={<FlightLeg flight={flight} />}>
-      {(card) => (
-        <>
-          <FlightLeg flight={card.flight} />
-          <Button className="w-full" onClick={() => onPrepare(card.flight)}>Preparation</Button>
-          <section className="ops-panel" aria-label="ForeFlight flight plan">
-            <div className="panel-bar">
-              <h2>Flight plan</h2><Badge variant={card.plan_status === 'partial' ? 'warning' : 'default'}>{card.plan_status === 'partial' ? 'ForeFlight · Partial' : 'ForeFlight'}</Badge>
-            </div>
-            {card.plan_status === 'unavailable' ? (
-              <p className="px-3 py-3 text-sm text-muted-foreground">Plan unavailable.</p>
-            ) : (
-              <dl className="compact-fields">
-                <dt>ETE</dt><dd>{card.ete_minutes === null ? noData : Math.floor(card.ete_minutes / 60) + 'h ' + String(card.ete_minutes % 60).padStart(2, '0') + 'm'}</dd>
-                <dt>ALTN</dt><dd>{card.alternate ?? noData}</dd>
-                <dt>RTE</dt><dd>{card.route ?? noData}</dd>
-              </dl>
-            )}
-          </section>
-          {card.handling.length > 0 && (
-            <section className="ops-panel">
-              <div className="panel-bar"><h2>Handling</h2><Badge>Leon</Badge></div>
-              <dl className="compact-fields">
-                {card.handling.map((handler) => (
-                  <div className="contents" key={handler.station + handler.name}>
-                    <dt>{handler.station}</dt>
-                    <dd>
-                      {handler.name}
-                      {handler.phone && <span className="block text-muted-foreground">{handler.phone}</span>}
-                      {handler.email && <span className="block text-muted-foreground">{handler.email}</span>}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          )}
-        </>
-      )}
-    </Resource>
+    <section className="ops-panel" aria-label="Flight plan">
+      <PanelHeader title="FLIGHT PLAN" source="ForeFlight" state={data} />
+      <dl className="compact-fields">
+        <dt>ETE</dt><dd>{ete === null ? 'UNAVAILABLE' : Math.floor(ete / 60) + 'h ' + String(ete % 60).padStart(2, '0') + 'm'}</dd>
+        <dt>RTE</dt><dd>{data.route ?? 'UNAVAILABLE'}</dd>
+        <dt>ALTN</dt><dd>{data.alternate ? data.alternate + (mode === 'LT' ? ' ICAO' : '') : unknown}</dd>
+        <dt>OVERFLIGHT</dt><dd>{data.overflight?.length ? data.overflight.map((code) => code ?? unknown).join(' / ') : unknown}</dd>
+      </dl>
+    </section>
+  )
+}
+
+function Contact({ value, kind }: { value: string | null; kind: 'phone' | 'email' }) {
+  if (!value) return <span className="minor">{unknown}</span>
+  const phone = value.replace(/[\s().-]/g, '')
+  const href = kind === 'phone'
+    ? /^\+?\d{5,18}$/.test(phone) && 'tel:' + phone
+    : /^[\w.+-]+@[\w.-]+\.[a-z]{2,}$/i.test(value) && 'mailto:' + value
+  return href ? <a href={href} className="text-primary underline">{value}</a> : <span>{value}</span>
+}
+
+function HandlingPanel({ data }: { data: Handling }) {
+  return (
+    <section className="ops-panel">
+      <PanelHeader title="HANDLING" source="Leon" state={data} />
+      <div className="divide-y divide-border">
+        {(['DEP', 'ARR'] as const).map((role) => {
+          const handler = data.handlers.find((candidate) => candidate.role === role)
+          return <div className="p-3 text-sm" key={role}>
+            <p><Badge>{role}</Badge> {handler?.name ?? unknown}</p>
+            {handler && <dl className="compact-fields px-0 pb-0">
+              <dt>TEL</dt><dd><Contact value={handler.phone} kind="phone" /></dd>
+              <dt>EMAIL</dt><dd><Contact value={handler.email} kind="email" /></dd>
+            </dl>}
+          </div>
+        })}
+      </div>
+    </section>
+  )
+}
+
+function Card({
+  api, selection, mode, onPrepare,
+}: { api: OpsApi; selection: Selection; mode: Display; onPrepare: () => void }) {
+  const [refreshKey, setRefreshKey] = useState(0)
+  const lastRefresh = useRef(0)
+  const plan = useCallback((signal: AbortSignal, refresh?: boolean) => api.plan(selection, signal, refresh), [api, selection])
+  const handling = useCallback((signal: AbortSignal, refresh?: boolean) => api.handling(selection, signal, refresh), [api, selection])
+  const assignments = useCallback((signal: AbortSignal, refresh?: boolean) => api.assignments(selection, signal, refresh), [api, selection])
+  const crew = useCallback((signal: AbortSignal, refresh?: boolean) => api.crew(selection, signal, refresh), [api, selection])
+  const weather = useCallback((signal: AbortSignal, refresh?: boolean) => api.metar(selection, signal, refresh), [api, selection])
+
+  return (
+    <>
+      <FlightLeg flight={selection.flight} mode={mode} />
+      <div className="flex items-center gap-2">
+        <Button className="flex-1" onClick={onPrepare}>Preparation</Button>
+        <Button variant="outline" size="icon" aria-label="Refresh Flight Card" onClick={() => {
+          const now = Date.now()
+          if (now - lastRefresh.current < 5000) return
+          lastRefresh.current = now
+          setRefreshKey((value) => value + 1)
+        }}><RefreshCw size={16} /></Button>
+      </div>
+      <Resource load={plan} label="flight plan" refreshKey={refreshKey}>
+        {(data) => <PlanPanel data={data} mode={mode} />}
+      </Resource>
+      <Resource load={assignments} label="crew assignments" refreshKey={refreshKey}>
+        {(assigned, _refresh, refreshing) => (
+          <>
+            <Resource load={crew} label="FDP" refreshKey={refreshKey}
+              pending={<CrewPanel data={assigned} assignments />}
+            >
+              {(data) => refreshing ? <CrewPanel data={assigned} assignments /> : <CrewPanel data={data} />}
+            </Resource>
+            <HotelPanel data={assigned} />
+          </>
+        )}
+      </Resource>
+      <Resource load={handling} label="handling" refreshKey={refreshKey}>
+        {(data) => <HandlingPanel data={data} />}
+      </Resource>
+      <Resource load={weather} label="METAR" refreshKey={refreshKey}>
+        {(data) => <WeatherPanel data={data} selection={selection} mode={mode} />}
+      </Resource>
+    </>
   )
 }

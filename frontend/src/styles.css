@@ -97,6 +97,7 @@
 }
 
 @media (max-width: 330px) {
+  .week-controls button { padding-inline: .45rem; }
   .strip { grid-template-columns: 3.1rem minmax(0, 1fr) minmax(6.8rem, 1fr); gap: .375rem; }
   .date-bar .date-control svg { display: none; }
 }
