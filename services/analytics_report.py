@@ -1,0 +1,534 @@
+"""Source-backed operational analytics over Leon schedule, not actual flight logs.
+
+Every financial/OTP item without a verified source is intentionally unavailable.
+Multi-month intervals use <=31-day Leon windows and disclose partial coverage.
+"""
+
+import asyncio
+import calendar
+from collections import Counter, defaultdict
+from datetime import UTC, date, datetime, timedelta
+from statistics import median
+
+from integrations.leon.tools import get_flight_schedule
+from services.snapshot_models import utc
+
+PERIODS = {
+    "7d": "7 дней",
+    "1m": "1 месяц",
+    "3m": "3 месяца",
+    "6m": "6 месяцев",
+    "12m": "12 месяцев",
+}
+VIEWS = {
+    "management": "Менеджмент",
+    "commercial": "Коммерция",
+    "finance": "Финансы",
+    "timings": "Тайминги",
+}
+TIGHT_TURN_MINUTES = 120  # Descriptive dashboard threshold, not a legal minimum.
+IDLE_MINUTES = 24 * 60  # Long between-flight schedule gap, not verified downtime.
+LONG_IDLE_MINUTES = 72 * 60
+
+
+def period_start(key, today):
+    if key == "7d":
+        return today - timedelta(days=6)
+    if key not in PERIODS:
+        raise ValueError("Неизвестный аналитический период.")
+    months = int(key[:-1])
+    month_index = today.year * 12 + today.month - 1 - months
+    year, month_zero = divmod(month_index, 12)
+    month = month_zero + 1
+    day = min(today.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def month_windows(start, end):
+    """Cover every calendar day once, respecting SKED's 31-day API limit."""
+    if start > end:
+        raise ValueError("Некорректный период.")
+    cursor = start
+    while cursor <= end:
+        last = min(cursor + timedelta(days=30), end)
+        yield cursor, last
+        cursor = last + timedelta(days=1)
+
+
+def minutes_label(value):
+    if value is None:
+        return "нет данных"
+    value = round(value)
+    hours, mins = divmod(value, 60)
+    return f"{hours}:{mins:02d}"
+
+
+def _sorted_counts(counter, count=5):
+    return sorted(counter.items(), key=lambda item: (-item[1], str(item[0])))[:count]
+
+
+def aggregate(flights, now):
+    """Aggregate scheduled fields only, never infer actual departure/arrival."""
+    seen = set()
+    valid = []
+    cancelled = 0
+    excluded = 0
+    unassigned = 0
+    for flight in flights:
+        if not isinstance(flight, dict):
+            excluded += 1
+            continue
+        dep = utc(flight.get("departureUTC"))
+        if dep is None or dep > now:
+            excluded += 1
+            continue
+        nid = flight.get("flightNid")
+        identity = (
+            ("nid", nid)
+            if type(nid) is int and nid > 0
+            else (
+                "fields",
+                flight.get("flightNumber"),
+                flight.get("departureUTC"),
+                flight.get("aircraft"),
+                flight.get("departure"),
+                flight.get("arrival"),
+            )
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if flight.get("cancelled") is True:
+            cancelled += 1
+            continue
+        reg = (flight.get("aircraft") or "").strip()
+        if not reg:
+            unassigned += 1
+        arr = utc(flight.get("arrivalUTC"))
+        block_minutes = None
+        if arr and 0 < (arr - dep).total_seconds() <= 48 * 3600:
+            block_minutes = round((arr - dep).total_seconds() / 60)
+        valid.append(
+            {
+                "reg": reg,
+                "flight": flight,
+                "departure": dep,
+                "arrival": arr,
+                "duration": block_minutes,
+                "ferry": (
+                    flight.get("ferry") if type(flight.get("ferry")) is bool else None
+                ),
+            }
+        )
+
+    routes = Counter()
+    destinations = Counter()
+    tails = Counter()
+    hours_by_tail = defaultdict(int)
+    hours_by_month = defaultdict(int)
+    legs_by_month = Counter()
+    departures = Counter()
+    durations = []
+    by_tail = defaultdict(list)
+    ferry_count = 0
+    other_count = 0
+    unknown_ferry = 0
+    ferry_minutes = 0
+    nonferry_minutes = 0
+    ferry_missing_duration = 0
+    ferry_routes = Counter()
+    status_counts = Counter()
+    for item in valid:
+        flight, reg = item["flight"], item["reg"]
+        status_counts[str(flight.get("status") or "UNKNOWN").upper()] += 1
+        if item["ferry"] is True:
+            ferry_count += 1
+        elif item["ferry"] is False:
+            other_count += 1
+        else:
+            unknown_ferry += 1
+        depart_code = flight.get("departure")
+        arrival_code = flight.get("arrival")
+        if depart_code and arrival_code:
+            route = f"{depart_code} → {arrival_code}"
+            routes[route] += 1
+            if item["ferry"] is True:
+                ferry_routes[route] += 1
+        if arrival_code:
+            destinations[arrival_code] += 1
+        if reg:
+            tails[reg] += 1
+            by_tail[reg].append(item)
+        month = item["departure"].strftime("%Y-%m")
+        legs_by_month[month] += 1
+        departures[item["departure"].hour // 6] += 1
+        if item["duration"] is not None:
+            if item["ferry"] is True:
+                ferry_minutes += item["duration"]
+            elif item["ferry"] is False:
+                nonferry_minutes += item["duration"]
+            durations.append(item["duration"])
+        elif item["ferry"] is True:
+            ferry_missing_duration += 1
+        if item["duration"] is not None:
+            hours_by_month[month] += item["duration"]
+            if reg:
+                hours_by_tail[reg] += item["duration"]
+
+    turns = []
+    overlaps = []
+    position_mismatches = []
+    for reg, legs in by_tail.items():
+        legs.sort(key=lambda item: item["departure"])
+        for previous, following in zip(legs, legs[1:]):
+            if previous["arrival"] is None:
+                continue
+            arrival_airport = previous["flight"].get("arrival")
+            departure_airport = following["flight"].get("departure")
+            if (
+                not arrival_airport
+                or not departure_airport
+                or arrival_airport != departure_airport
+            ):
+                position_mismatches.append(reg)
+                continue
+            delta = (following["departure"] - previous["arrival"]).total_seconds() / 60
+            entry = {
+                "tail": reg,
+                "minutes": round(delta),
+                "airport": previous["flight"].get("arrival") or "—",
+                "date": following["departure"].strftime("%d %b"),
+            }
+            if delta < 0:
+                overlaps.append(entry)
+            else:
+                turns.append(entry)
+    turns.sort(key=lambda item: item["minutes"])
+    idle = [item for item in turns if item["minutes"] >= IDLE_MINUTES]
+    idle_by_tail = Counter()
+    for item in idle:
+        idle_by_tail[item["tail"]] += item["minutes"]
+    longest = sorted(
+        (item for item in valid if item["duration"] is not None),
+        key=lambda item: item["duration"],
+        reverse=True,
+    )[:3]
+    return {
+        "legs": len(valid),
+        "cancelled": cancelled,
+        "unassigned": unassigned,
+        "excluded": excluded,
+        "tails": tails,
+        "routes": routes,
+        "destinations": destinations,
+        "minutes": sum(durations),
+        "known_durations": len(durations),
+        "average": round(sum(durations) / len(durations)) if durations else None,
+        "median": round(median(durations)) if durations else None,
+        "hours_by_tail": dict(hours_by_tail),
+        "hours_by_month": dict(hours_by_month),
+        "legs_by_month": legs_by_month,
+        "departures": departures,
+        "turns": turns,
+        "overlaps": overlaps,
+        "position_mismatches": position_mismatches,
+        "longest": longest,
+        "ferry_count": ferry_count,
+        "nonferry_count": other_count,
+        "unknown_ferry": unknown_ferry,
+        "ferry_minutes": ferry_minutes,
+        "nonferry_minutes": nonferry_minutes,
+        "ferry_missing_duration": ferry_missing_duration,
+        "ferry_routes": ferry_routes,
+        "status_counts": status_counts,
+        "idle": idle,
+        "idle_minutes": sum(item["minutes"] for item in idle),
+        "idle_72h": sum(item["minutes"] >= LONG_IDLE_MINUTES for item in idle),
+        "idle_by_tail": idle_by_tail,
+    }
+
+
+async def load_analytics(period, *, now=None, loader=None):
+    """Attempt all 31-day windows; never turn a failed window into zero flights."""
+    if period not in PERIODS:
+        raise ValueError("Неизвестный аналитический период.")
+    now = now or datetime.now(UTC)
+    if now.tzinfo is None:
+        raise ValueError("Требуется время UTC с часовым поясом.")
+    now = now.astimezone(UTC)
+    start, end = period_start(period, now.date()), now.date()
+    windows = list(month_windows(start, end))
+    source = loader or get_flight_schedule
+    slots = asyncio.Semaphore(3)
+
+    async def get_window(first, last):
+        async with slots:
+            try:
+                result = await asyncio.wait_for(
+                    source(first.isoformat(), last.isoformat()), timeout=60
+                )
+                if not isinstance(result, dict) or not isinstance(
+                    result.get("flights"), list
+                ):
+                    raise TypeError("Неправильный ответ Leon")
+            except Exception:  # noqa: BLE001 -- failed source window stays explicitly partial
+                return None
+
+            # Search returns a reliable ferry=True filtered subset, while the
+            # default normalized flight record may not include an empty flag.
+            # Do not call this additional endpoint for injected test sources.
+            flights = [dict(f) if isinstance(f, dict) else f for f in result["flights"]]
+            result = {**result, "flights": flights}
+            missing = [
+                f
+                for f in flights
+                if isinstance(f, dict) and type(f.get("ferry")) is not bool
+            ]
+            if loader is None and missing:
+                try:
+                    ferry_result = await asyncio.wait_for(
+                        get_flight_schedule(
+                            first.isoformat(), last.isoformat(), ferry=True
+                        ),
+                        timeout=60,
+                    )
+                    if ferry_result.get("complete") is True:
+                        ids = {
+                            f.get("flightNid")
+                            for f in ferry_result["flights"]
+                            if isinstance(f, dict) and f.get("flightNid") is not None
+                        }
+                        for flight in missing:
+                            if flight.get("flightNid") is not None:
+                                flight["ferry"] = flight["flightNid"] in ids
+                except Exception:  # noqa: BLE001 -- preserve unknown classification
+                    pass
+            return result
+
+    results = await asyncio.gather(
+        *(get_window(first, last) for first, last in windows)
+    )
+    available = [
+        flight
+        for result in results
+        if result is not None
+        for flight in result["flights"]
+    ]
+    complete_windows = sum(
+        result is not None and result.get("complete") is True for result in results
+    )
+    available_windows = sum(result is not None for result in results)
+    if available_windows == 0:
+        raise RuntimeError("Leon не предоставил данных ни за один интервал.")
+    metrics = aggregate(available, now)
+    return {
+        **metrics,
+        "start": start,
+        "end": end,
+        "period": period,
+        "fetched_at": datetime.now(UTC),
+        "complete": complete_windows == len(windows),
+        "total_windows": len(windows),
+        "received_windows": available_windows,
+        "complete_windows": complete_windows,
+    }
+
+
+def _top_lines(counter, *, unit="рейсов", limit=5):
+    ranked = _sorted_counts(counter, limit)
+    return [f"• {key}: {value} {unit}" for key, value in ranked] or ["Нет данных."]
+
+
+def _ferry_lines(result):
+    known = result["ferry_count"] + result["nonferry_count"]
+    share = f"{result['ferry_count'] / known * 100:.1f}%" if known else "нет данных"
+    return [
+        f"Empty / ferry (Leon): {result['ferry_count']}",
+        f"Не ferry (Leon): {result['nonferry_count']}",
+        f"Без классификации: {result['unknown_ferry']}",
+        f"Доля ferry среди классифицированных: {share}",
+        f"Плановые часы ferry: {minutes_label(result['ferry_minutes'])}",
+    ]
+
+
+def _idle_lines(result):
+    return [
+        f"Длительных промежутков между рейсами (≥24 ч): {len(result['idle'])}",
+        f"Их суммарная продолжительность: {minutes_label(result['idle_minutes'])}",
+        f"Из них ≥72 ч: {result['idle_72h']}",
+    ]
+
+
+def _tail_idle_lines(result):
+    entries = sorted(
+        result["idle_by_tail"].items(),
+        key=lambda row: (-row[1], row[0]),
+    )[:5]
+    return [f"• {tail}: {minutes_label(minutes)}" for tail, minutes in entries] or [
+        "Нет зарегистрированных промежутков ≥24 ч."
+    ]
+
+
+def render_analytics(result, view):
+    if view not in VIEWS:
+        raise ValueError("Неизвестный раздел аналитики.")
+    period = PERIODS[result["period"]]
+    lines = [
+        f"ANALYTICS · {VIEWS[view].upper()} · {period}",
+        f"{result['start'].isoformat()} — {result['end'].isoformat()} (UTC)",
+        "Источник: Leon · только расписание; не фактический журнал полётов.",
+        f"Охват: {result['complete_windows']}/{result['total_windows']} интервалов",
+    ]
+    if not result["complete"]:
+        lines.extend(
+            [
+                "ВНИМАНИЕ: неполная выборка. Все значения ниже — только по полученным записям.",
+                "Нельзя считать отсутствие рейса в данных подтверждённым.",
+            ]
+        )
+    lines.append("")
+    if view == "management":
+        lines.extend(
+            [
+                f"Плановых рейсов: {result['legs']}",
+                f"Отмен по признаку Leon: {result['cancelled']}",
+                f"Бортов с рейсами: {len(result['tails'])}",
+                f"Плановое время рейсов: {minutes_label(result['minutes'])}",
+                f"Без назначенного борта: {result['unassigned']}",
+                "",
+                "Структура рейсов:",
+                *_ferry_lines(result),
+                "",
+                "Простои между плановыми рейсами:",
+                *_idle_lines(result),
+                "",
+                "Наиболее загруженные борта (плановые рейсы):",
+                *_top_lines(result["tails"]),
+                "",
+                "Количество рейсов по месяцам:",
+                *_top_lines(
+                    result["legs_by_month"],
+                    unit="рейсов",
+                    limit=12,
+                ),
+            ]
+        )
+    elif view == "commercial":
+        lines.extend(
+            [
+                f"Плановых рейсов: {result['legs']}",
+                f"Уникальных маршрутов: {len(result['routes'])}",
+                f"Уникальных аэропортов назначения: {len(result['destinations'])}",
+                "",
+                "Структура перевозок:",
+                *_ferry_lines(result),
+                "Ferry — не подтверждённый доходный рейс.",
+                "Категория «не ferry» также не гарантирует коммерческий рейс.",
+                "",
+                "Маршруты empty / ferry:",
+                *_top_lines(result["ferry_routes"]),
+                "",
+                "Простои между плановыми рейсами:",
+                *_idle_lines(result),
+                "",
+                "Популярные направления:",
+                *_top_lines(result["destinations"]),
+                "",
+                "Маршруты по частоте:",
+                *_top_lines(result["routes"]),
+                "",
+                "Тип перевозки, пассажиры, выручка по клиентам: нет подтверждённых данных.",
+            ]
+        )
+    elif view == "finance":
+        lines.extend(
+            [
+                "Плановая база для финансового анализа:",
+                f"Количество плановых рейсов: {result['legs']}",
+                f"Суммарное плановое время: {minutes_label(result['minutes'])}",
+                f"Рейсов без расчётного времени: "
+                f"{result['legs'] - result['known_durations']}",
+                "",
+                "Плановые empty / ferry:",
+                *_ferry_lines(result),
+                f"Часы non-ferry: {minutes_label(result['nonferry_minutes'])}",
+                "Это не подтверждённые расходы и не оплаченный налёт.",
+                "",
+                "Длительные промежутки между рейсами:",
+                *_idle_lines(result),
+                "",
+                "Лётная нагрузка по бортам (плановые часы):",
+                *(
+                    [
+                        f"• {tail}: {minutes_label(total)}"
+                        for tail, total in sorted(
+                            result["hours_by_tail"].items(),
+                            key=lambda entry: (-entry[1], entry[0]),
+                        )[:10]
+                    ]
+                    or ["Нет данных."]
+                ),
+                "",
+                "Выручка, инвойсы, фактические расходы, прибыль и маржа:",
+                "нет данных из подтверждённой финансовой системы.",
+                "Демонстрационные тарифы CHARTER CHECK сюда не подмешиваются.",
+            ]
+        )
+    else:
+        turns = result["turns"]
+        lines.extend(
+            [
+                f"Рейсов с плановым временем: {result['known_durations']}/{result['legs']}",
+                f"Плановые блок-часы (сумма): {minutes_label(result['minutes'])}",
+                f"Средняя длительность: {minutes_label(result['average'])}",
+                f"Медиана длительности: {minutes_label(result['median'])}",
+                f"Плановых интервалов между рейсами: {len(turns)}",
+                f"Интервалов до {TIGHT_TURN_MINUTES} мин: "
+                f"{sum(t['minutes'] < TIGHT_TURN_MINUTES for t in turns)}",
+                f"Перекрытий по расписанию: {len(result['overlaps'])}",
+                f"Несовпадений аэропортов между рейсами ВС: "
+                f"{len(result['position_mismatches'])}",
+                "",
+                "Распределение рейсов по типу:",
+                *_ferry_lines(result),
+                "",
+                "Длительные интервалы / простои (план):",
+                *_idle_lines(result),
+                "По бортам:",
+                *_tail_idle_lines(result),
+                "",
+                "Короткие интервалы между рейсами (план):",
+                *(
+                    [
+                        f"• {t['tail']} · {t['airport']} · {t['date']}: "
+                        f"{minutes_label(t['minutes'])}"
+                        for t in turns[:5]
+                    ]
+                    or ["Нет данных."]
+                ),
+                "",
+                "Распределение плановых вылетов (UTC):",
+                *[
+                    f"• {n * 6:02d}:00–{(n + 1) * 6:02d}:00: "
+                    f"{result['departures'][n]} рейсов"
+                    for n in range(4)
+                ],
+                "",
+                "Фактические OUT/OFF/ON/IN и отклонения от расписания: нет данных.",
+                "Порог 120 мин — аналитический фильтр, не норматив turnaround.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Простой = только подтверждённый парой последовательных плановых "
+            "рейсов интервал на одном аэродроме; не фактический downtime.",
+            "Не учитываются периоды до первого и после последнего рейса, "
+            "а также ВС без рейсов в выборке.",
+        ]
+    )
+    if result["excluded"]:
+        lines.append(
+            f"Пропущено {result['excluded']} записей без корректного прошедшего времени вылета."
+        )
+    return "\n".join(lines)

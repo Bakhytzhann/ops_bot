@@ -15,10 +15,14 @@ from services.foreflight_operations import (
 from services.snapshot_models import SourceBlock, zulu
 
 
-async def load_foreflight(flight, partial=None):
+async def load_foreflight(
+    flight, partial=None, *, match=None, briefing_only=False, stations=()
+):
     day = flight["departureUTC"][:10]
     async with ForeFlightClient() as client:
-        row, basis = await find_flight(client, flight["flightNumber"], day, flight)
+        row, basis = match or await find_flight(
+            client, flight["flightNumber"], day, flight
+        )
         # A callsign alone must not silently attach another leg's briefing.
         for left, right in (
             (flight.get("departure"), row.get("departure")),
@@ -40,12 +44,24 @@ async def load_foreflight(flight, partial=None):
             if difference
             else ""
         )
-        detail, document, overflight = await asyncio.gather(
-            client.get_flight(row["flightId"]),
-            client.get_document(row["flightId"], "briefing"),
-            client.get_overflight(row["flightId"]),
-            return_exceptions=True,
-        )
+        if briefing_only and abs(difference) > 60:
+            return {
+                "briefing": SourceBlock(
+                    "ForeFlight", details={"departure_offset_minutes": difference}
+                )
+            }
+        if briefing_only:
+            detail = overflight = None
+            (document,) = await asyncio.gather(
+                client.get_document(row["flightId"], "briefing"), return_exceptions=True
+            )
+        else:
+            detail, document, overflight = await asyncio.gather(
+                client.get_flight(row["flightId"]),
+                client.get_document(row["flightId"], "briefing"),
+                client.get_overflight(row["flightId"]),
+                return_exceptions=True,
+            )
     briefing_url = document.get("url") if isinstance(document, dict) else None
     try:
         parsed = urlsplit(briefing_url) if isinstance(briefing_url, str) else None
@@ -70,6 +86,7 @@ async def load_foreflight(flight, partial=None):
                 "generated": document.get("timeGenerated")
                 if isinstance(document, dict)
                 else None,
+                "departure_offset_minutes": difference,
             },
         )
     }
@@ -77,10 +94,9 @@ async def load_foreflight(flight, partial=None):
         data = detail.get("flightData") or {}
         performance = detail.get("performance") or {}
         times = performance.get("times") or {}
-        has_ete = duration(times.get("timeToDestinationMinutes")) != "нет данных"
-        lines = [
-            "EET " + duration(times.get("timeToDestinationMinutes")).split(" (")[0]
-        ]
+        eet = duration(times.get("timeToDestinationMinutes")).split(" (")[0]
+        has_ete = eet != "нет данных"
+        lines = ["EET " + eet]
         errors = bool(
             detail.get("errors")
             or performance.get("errors")
@@ -97,7 +113,7 @@ async def load_foreflight(flight, partial=None):
             details={
                 "basis": basis,
                 "has_ete": has_ete,
-                "eet": duration(times.get("timeToDestinationMinutes")).split(" (")[0],
+                "eet": eet,
                 "eet_minutes": times.get("timeToDestinationMinutes"),
             },
         )
@@ -133,10 +149,12 @@ async def load_foreflight(flight, partial=None):
     if partial is not None:
         partial.update(blocks)
     try:
-        if not isinstance(document, dict):
+        if not briefing_url:
             raise TypeError("Briefing unavailable")
-        text = await download_briefing(document["url"])
-        stations = list(dict.fromkeys([flight["departure"], flight["arrival"]]))
+        text = await download_briefing(briefing_url)
+        stations = list(
+            dict.fromkeys([flight["departure"], flight["arrival"], *stations])
+        )
         records, recognized = extract_notams(text, stations)
         block = SourceBlock(
             "ForeFlight briefing",

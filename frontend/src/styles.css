@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --background: #0b131d;
+  --foreground: #edf5fc;
+  --card: #131f2c;
+  --muted: #1c2c3c;
+  --muted-foreground: #a7b9cc;
+  --border: #293b4d;
+  --primary: #6be6bc;
+  --primary-foreground: #0b2c25;
+  --warning: #f6c779;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+}
+
+@theme inline {
+  --font-sans: "Manrope Variable", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-warning: var(--warning);
+}
+
+@layer base {
+  body { @apply bg-background text-foreground antialiased; }
+  button, summary { @apply cursor-pointer; }
+  button, summary, input { -webkit-tap-highlight-color: transparent; }
+  summary:focus-visible { @apply outline-2 outline-primary; }
+}
+
+@layer components {
+  .app-frame {
+    @apply mx-auto w-full max-w-[36rem] sm:border-x sm:border-border;
+    min-height: var(--tg-viewport-stable-height, 100dvh);
+    padding-bottom: var(--safe-bottom);
+  }
+
+  .screen-header {
+    @apply sticky top-0 z-10 flex min-h-17 items-center justify-between gap-2 border-b border-border bg-background px-4 pb-2.5;
+    padding-top: calc(.625rem + var(--safe-top));
+  }
+
+  .brand-mark {
+    @apply grid size-10 shrink-0 place-items-center rounded-[.625rem] border border-primary/25 bg-primary/10 text-primary;
+  }
+
+  .caption, .minor {
+    @apply font-mono text-xs text-muted-foreground;
+  }
+
+  .caption { @apply uppercase tracking-wider; }
+  .minor { @apply max-w-full truncate text-[.7rem]; }
+  .screen-content { @apply space-y-3 px-3 py-3 sm:px-4; }
+  .date-bar { @apply flex min-w-0 items-center gap-1.5; }
+
+  .date-control {
+    @apply relative flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-card px-2 text-sm font-semibold focus-within:ring-2 focus-within:ring-primary;
+  }
+
+  .date-control svg { @apply shrink-0 text-muted-foreground; }
+  .date-control span { @apply text-center; }
+  .date-control input { @apply absolute inset-0 h-full w-full cursor-pointer opacity-0; }
+  .date-control input::-webkit-calendar-picker-indicator { @apply absolute inset-0 h-full w-full cursor-pointer opacity-0; }
+
+  .ops-panel { @apply overflow-hidden rounded-xl border border-border bg-card; }
+  .panel-bar { @apply flex min-h-10 items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-sm font-semibold; }
+  .strip { @apply grid w-full grid-cols-[3.5rem_minmax(0,1fr)_minmax(7rem,1.15fr)] items-center gap-2 px-3 text-left; }
+  .strip-head { @apply min-h-8 border-b border-border bg-background/50 font-mono text-[.65rem] uppercase tracking-wider text-muted-foreground; }
+  .strip-flight { @apply min-h-13 py-1.5 text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary; }
+  .strip-flight strong { @apply font-bold; }
+
+  .compact-fields { @apply grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 p-3 text-sm; }
+  .compact-fields dt { @apply font-mono text-xs text-muted-foreground; }
+  .compact-fields dd { @apply min-w-0 wrap-anywhere; }
+  .metrics-detail { @apply rounded-md bg-background/70 p-2.5; }
+  .prep-leg { @apply flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card p-2.5 text-sm; }
+  .raw-text { @apply whitespace-pre-wrap wrap-anywhere text-xs leading-relaxed; }
+
+  .notam-detail { @apply rounded-md border border-border bg-background/70; }
+  .notam-detail + .notam-detail { @apply mt-1.5; }
+  .notam-detail summary { @apply flex min-h-10 items-center justify-between gap-2 rounded-md px-2.5 font-mono text-sm; }
+  .notam-detail summary::before { content: "+"; @apply text-primary; }
+  .notam-detail summary > span:first-child { @apply mr-auto; }
+  .notam-detail[open] summary::before { content: "−"; }
+  .notam-detail pre { @apply border-t border-border p-2.5; }
+
+  .read-state { @apply flex min-h-13 flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-sm text-muted-foreground; }
+  .loading-dot { @apply size-2 rounded-full bg-primary motion-safe:animate-pulse; }
+
+  .quick-actions { @apply grid grid-cols-2 gap-2.5; }
+  .tool-row {
+    @apply flex min-h-14 w-full min-w-0 items-center justify-between gap-2 border-t border-border
+      px-3 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary;
+  }
+  .tool-row > span:last-child { @apply font-mono text-[.65rem]; }
+  .tool-tabs { @apply flex flex-wrap items-center gap-1.5; }
+  .tool-tabs button { @apply px-2.5 text-xs; }
+  .facts { @apply grid grid-cols-2 gap-x-2 px-3 py-2 sm:grid-cols-3; }
+  .facts > div { @apply min-w-0 border-b border-border py-2; }
+  .facts dt { @apply font-mono text-[.7rem] text-muted-foreground; }
+  .facts dd { @apply wrap-anywhere text-sm font-semibold; }
+  .tool-section { @apply border-b border-border px-3 py-2.5; }
+  .tool-section:last-child { @apply border-b-0; }
+  .tool-section .tool-row { @apply mt-2 px-0; }
+  .tool-line { @apply wrap-anywhere border-t border-border px-3 py-2 text-sm; }
+  .tool-line.minor { @apply whitespace-normal; }
+  .tool-disclosure { @apply border-t border-border; }
+  .tool-disclosure summary { @apply px-3 py-3 text-sm font-semibold; }
+  .tool-form { @apply grid min-w-0 gap-2.5 p-3 text-sm; }
+  .tool-form label { @apply grid min-w-0 gap-1 font-semibold; }
+  .tool-form select, .tool-form input:not([type=checkbox]), .tool-form textarea {
+    @apply min-h-11 w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-1.5
+      text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary;
+  }
+  .tool-form .checkbox-label { @apply flex min-h-11 items-center gap-2; }
+}
+
+@media (max-width: 330px) {
+  .week-controls button { padding-inline: .45rem; }
+  .strip { grid-template-columns: 3.1rem minmax(0, 1fr) minmax(6.8rem, 1fr); gap: .375rem; }
+  .date-bar .date-control svg { display: none; }
+}

@@ -54,7 +54,7 @@ def context(monkeypatch):
 @pytest.fixture
 def identity(monkeypatch):
     monkeypatch.setattr(flight_card, "cache", SourceCache())
-    monkeypatch.setattr(flight_card, "load_foreflight", AsyncMock(return_value={}))
+    monkeypatch.setattr(flight_card, "load_fast_foreflight", AsyncMock(return_value={}))
     u, c = current_user_id.set(42), current_chat_id.set(42)
     yield
     current_chat_id.reset(c)
@@ -62,21 +62,26 @@ def identity(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sked_is_exactly_three_days_and_buttons_contain_route(
+async def test_sked_seven_day_numbered_text_and_navigation(
     context, identity, monkeypatch
 ):
     query = AsyncMock(return_value={"flights": [flight(1)], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     u = update()
     await browser.show_week(u, context, today=date(2026, 12, 29))
-    query.assert_awaited_once_with("2026-12-29", "2026-12-31")
-    markup = u.effective_message.reply_text.call_args.kwargs["reply_markup"]
-    label = markup.inline_keyboard[0][0].text
-    assert label == "ABC1265 11NOV UTTT 1200z 1330z UAAA"
-    assert len(markup.inline_keyboard[0][0].callback_data.encode()) <= 64
+    query.assert_awaited_once_with("2026-12-29", "2027-01-04")
+    call = u.effective_message.reply_text.call_args
+    assert "1. ABC1265" in call.args[0]
+    buttons = [
+        item for row in call.kwargs["reply_markup"].inline_keyboard for item in row
+    ]
+    assert all(not button.callback_data.startswith("fl:") for button in buttons)
+    assert any(button.callback_data.endswith(":prev") for button in buttons)
+    assert any(button.callback_data.endswith(":next") for button in buttons)
+    assert len([b for b in buttons if b.text in {"LT · IATA", "UTC · ICAO"}]) == 1
 
 
-def test_all_flights_reachable_across_pages():
+def test_all_flights_reachable_as_numbered_rows_across_pages():
     rows = [flight(i) for i in range(1, 32)]
     listing = {
         "flights": rows,
@@ -84,16 +89,17 @@ def test_all_flights_reachable_across_pages():
         "end": "2026-11-17",
         "complete": True,
     }
-    ids = []
     for page in range(3):
-        _, markup = browser.render_page("token", listing, page)
-        ids.extend(
-            b.callback_data
+        text, markup = browser.render_page("token", listing, page)
+        for index in range(
+            page * browser.PAGE_SIZE, min((page + 1) * browser.PAGE_SIZE, len(rows))
+        ):
+            assert f"{index + 1}. ABC1265" in text
+        assert all(
+            not button.callback_data.startswith("fl:")
             for row in markup.inline_keyboard
-            for b in row
-            if b.callback_data.startswith("fl:")
+            for button in row
         )
-    assert ids == [f"fl:token:{i}" for i in range(31)]
     with pytest.raises(ValueError):
         browser.render_page("token", listing, 3)
 
@@ -123,6 +129,7 @@ async def test_shared_list_selects_exact_nid_for_another_member(
     load.assert_awaited_once()
     assert load.call_args.args == (flight(222),)
     assert load.call_args.kwargs["refresh"] is False
+    assert load.call_args.kwargs["from_sked"] is True
     assert callable(load.call_args.kwargs["on_update"])
     assert "ABC1265" in u.callback_query.edit_message_text.call_args.args[0]
     u.effective_message.reply_text.assert_not_awaited()
@@ -209,7 +216,7 @@ async def test_card_refreshes_exact_leg_then_fetches_crew_and_weather(
     snapshot = await flight_card.load_flight_snapshot(flight(222))
     text = flight_card.render_snapshot(snapshot)
     crew.assert_awaited_once_with(222)
-    weather.assert_awaited_once_with(second, "2026-11-11", include_taf=True)
+    weather.assert_awaited_once_with(second, "2026-11-11", include_taf=False)
     assert "UACC 1200z 1330z UAAA" in text
     assert snapshot.blocks["weather"].text == "UACC and UAAA METAR"
 
@@ -231,7 +238,7 @@ async def test_card_preserves_weather_if_crew_fails(identity, monkeypatch):
     )
     snapshot = await flight_card.load_flight_snapshot(flight(111))
     text = flight_card.render_snapshot(snapshot)
-    assert "CREW" not in text and "RuntimeError" not in text
+    assert "RuntimeError" not in text
     assert snapshot.blocks["weather"].text == "RAW METAR"
 
 
@@ -260,8 +267,8 @@ def test_home_keyboard_persists():
 async def test_start_shows_compact_default_keyboard(context):
     u = update(text="/start@OPS_bot")
     await bot.handle_message(u, context)
-    u.effective_message.reply_text.assert_awaited_once()
-    assert "шесть кнопок" in u.effective_message.reply_text.call_args.args[0]
+    # The keyboard is installed by screen_message_handler, not this direct handler.
+    u.effective_message.reply_text.assert_not_awaited()
 
 
 def test_real_crew_shape_shows_name_and_position_without_contacts():
@@ -292,7 +299,7 @@ def test_real_crew_shape_shows_name_and_position_without_contacts():
 
 
 @pytest.mark.asyncio
-async def test_search_keeps_ambiguous_matches_as_exact_flight_buttons(
+async def test_search_keeps_ambiguous_matches_as_numbered_rows(
     context, identity, monkeypatch
 ):
     query = AsyncMock(
@@ -304,15 +311,10 @@ async def test_search_keeps_ambiguous_matches_as_exact_flight_buttons(
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     u = update()
     await browser.show_week(u, context, search="ABC1265 на 2026-11-11")
-    markup = u.effective_message.reply_text.call_args.kwargs["reply_markup"]
-    buttons = [
-        b
-        for row in markup.inline_keyboard
-        for b in row
-        if b.callback_data.startswith("fl:")
-    ]
-    assert len(buttons) == 2
-    assert "Поиск:" in u.effective_message.reply_text.call_args.args[0]
+    text = u.effective_message.reply_text.call_args.args[0]
+    assert "1. ABC1265" in text and "2. ABC1265" in text
+    assert "ABC999" not in text
+    assert "Поиск:" in text or "SKED" in text
 
 
 @pytest.mark.asyncio
@@ -343,3 +345,43 @@ async def test_ai_does_not_block_back_navigation_or_overwrite_new_screen(
     analyze.assert_not_awaited()
     ai.callback_query.edit_message_text.assert_not_awaited()
     back.callback_query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_number_from_sked_opens_exact_flight_without_inline_flight_button(
+    context, identity, monkeypatch
+):
+    rows = [flight(101, "ABC101"), flight(202, "ABC202")]
+    monkeypatch.setattr(
+        browser,
+        "get_flight_schedule",
+        AsyncMock(return_value={"flights": rows, "complete": True}),
+    )
+    shown = update()
+    await browser.show_week(shown, context, today=date(2026, 11, 11))
+    typed = update(text="2")
+    assert browser.accepts_sked_number(typed, context)
+    snapshot = FlightSnapshot(rows[1])
+    loader = AsyncMock(return_value=snapshot)
+    monkeypatch.setattr(browser, "load_flight_snapshot", loader)
+    await browser.select_sked_number(typed, context)
+    loader.assert_awaited_once()
+    assert loader.call_args.args == (rows[1],)
+    assert loader.call_args.kwargs["from_sked"] is True
+    assert "ABC202" in typed.effective_message.reply_text.call_args.args[0]
+    assert (
+        context.user_data["flight_navigation"][(42, None)]["selected_flight_id"] == 202
+    )
+    assert not browser.accepts_sked_number(update(text="hello"), context)
+
+
+@pytest.mark.asyncio
+async def test_seven_day_navigation_keeps_same_combined_view(
+    context, identity, monkeypatch
+):
+    schedule = AsyncMock(return_value={"flights": [], "complete": True})
+    monkeypatch.setattr(browser, "get_flight_schedule", schedule)
+    await browser.show_week(update(), context, today=date(2026, 12, 29))
+    token = context.user_data["active_sked"][(42, None)]
+    await browser.handle_selection(update(data=f"sk:{token}:next"), context)
+    schedule.assert_awaited_with("2027-01-05", "2027-01-11")

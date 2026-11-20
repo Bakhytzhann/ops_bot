@@ -3,13 +3,14 @@
 import asyncio
 import logging
 import re
+from hashlib import sha256
 from html import escape
 from time import perf_counter
 
 from loguru import logger as timing_logger
 from telegram import BotCommandScopeAllPrivateChats, ForceReply, Update
 from telegram.constants import ChatAction
-from telegram.error import TelegramError
+from telegram.error import Conflict, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -25,6 +26,9 @@ from bot.admission import (
     request_access,
     show_access,
 )
+from bot.analytics import analytics_callback, show_analytics
+from bot.charter_check import charter_callback, show_charter
+from bot.charter_quote import quote_callback
 from bot.commands import (
     COMMANDS,
     execute_command,
@@ -32,17 +36,29 @@ from bot.commands import (
 )
 from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
 from bot.flight_browser import (
+    accepts_sked_number,
     handle_selection,
     invalidate_screen,
     is_card_notice_callback,
+    select_sked_number,
     show_week,
 )
-from bot.keyboards import (
-    HOME_PLACEHOLDERS,
-    SCHEDULE_BUTTON,
+from bot.ground_turns import (
+    clear_ground_turn_input,
+    deactivate_ground,
+    ground_text_accepted,
+    ground_turn_callback,
+    handle_ground_text,
+    handle_ground_turn_input,
+    has_ground_turn_input,
+    show_ground_turns,
 )
-from bot.main_screen import dispatch_screen
+from bot.keyboards import SCHEDULE_BUTTON
+from bot.main_screen import HOME_ACTIONS, dispatch_screen
 from bot.message_edits import edit_message_text
+from bot.miniapp import configure_mini_app
+from bot.ops_brief import ops_brief_callback, show_ops_brief
+from config.instance_lock import windows_instance
 from config.settings import settings
 from integrations.foreflight.api_client import ForeFlightError
 
@@ -90,10 +106,11 @@ def accepts_message(update, context):
         and message.text
         and (
             parsed_command(message.text)
-            or message.text.strip() == SCHEDULE_BUTTON
-            or message.text.strip() in HOME_PLACEHOLDERS
-            or message.text.strip() == "FLEET DOCS"
+            or message.text.strip() in HOME_ACTIONS
             or pending_reply(update, context)
+            or has_ground_turn_input(context)
+            or ground_text_accepted(context, message.text)
+            or accepts_sked_number(update, context)
         )
     )
 
@@ -135,6 +152,21 @@ async def handle_button(update, context):
             "Доступ разрешён только в личном чате для авторизованных пользователей.",
             show_alert=True,
         )
+        return
+    if (query.data or "").startswith("opb:"):
+        await ops_brief_callback(update, context)
+        return
+    if (query.data or "").startswith("ana:"):
+        await analytics_callback(update, context)
+        return
+    if (query.data or "").startswith("quote:"):
+        await quote_callback(update, context)
+        return
+    if (query.data or "").startswith("char:"):
+        await charter_callback(update, context)
+        return
+    if (query.data or "").startswith("gt:"):
+        await ground_turn_callback(update, context)
         return
     if (query.data or "").startswith("docs:"):
         category = query.data.removeprefix("docs:")
@@ -253,16 +285,32 @@ async def _handle_message(update, context):
         return
     command = parsed_command(message.text)
     text = message.text.strip()
+    if text in HOME_ACTIONS or command:
+        if text != "SKED" and not (command and command[0] in {"week", "sked"}):
+            context.user_data.pop("active_sked", None)
+        clear_ground_turn_input(context)
+        if text != "GROUND STATUS":
+            deactivate_ground(context)
+    if text == "OPS BRIEF":
+        await show_ops_brief(update, context)
+        return
+    if text == "ANALYTICS":
+        await show_analytics(update, context)
+        return
+    if text == "CHARTER CHECK":
+        await show_charter(update, context)
+        return
+    if text == "GROUND STATUS":
+        await show_ground_turns(update, context)
+        return
     if text == SCHEDULE_BUTTON or (command and command[0] in {"week", "sked"}):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
         )
         await weekly_flow(update, context)
         return
-    if (
-        text in HOME_PLACEHOLDERS
-        or text == "FLEET DOCS"
-        or (command and command[0] in {"start", "menu", "help", "cancel", "access"})
+    if text == "FLEET DOCS" or (
+        command and command[0] in {"start", "menu", "help", "cancel", "access"}
     ):
         context.user_data.setdefault("operation_inputs", {}).pop(
             pending_key(update), None
@@ -274,16 +322,29 @@ async def _handle_message(update, context):
             await message.reply_text(
                 "FLEET DOCS · выберите раздел", reply_markup=fleet_docs_keyboard()
             )
-        elif text in HOME_PLACEHOLDERS:
-            await message.reply_text(f"{text}: функция пока не подключена.")
         elif command and command[0] == "cancel":
             await message.reply_text("Ввод отменён.")
         elif command and command[0] == "help":
             await message.reply_text(help_text())
-        else:
-            await message.reply_text(
-                "OPS Bot · используйте шесть кнопок под полем ввода."
-            )
+        elif command and command[0] == "menu":
+            await message.reply_text("Выберите раздел на клавиатуре.")
+        # /start only installs the persistent keyboard; no duplicate reply.
+        return
+    if not command and has_ground_turn_input(context):
+        await handle_ground_turn_input(update, context)
+        return
+    if not command and accepts_sked_number(update, context):
+        try:
+            await select_sked_number(update, context)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
+        return
+    if (
+        not command
+        and not pending_reply(update, context)
+        and ground_text_accepted(context, text)
+    ):
+        await handle_ground_text(update, context)
         return
     if command:
         action, arguments = command
@@ -340,11 +401,10 @@ async def _handle_message(update, context):
 async def setup_telegram(application):
     global BOT_USERNAME
     BOT_USERNAME = application.bot.username
-    # Import legacy allowlist into persistent storage before serving updates.
     from bot.access import access_store
 
-    for user in settings.allowed_user_ids:
-        access_store.get(user)
+    with access_store.connect():
+        pass
     if not settings.admin_ids:
         timing_logger.warning(
             "TELEGRAM_ADMIN_IDS is empty; admission decisions are unavailable"
@@ -356,6 +416,7 @@ async def setup_telegram(application):
         timing_logger.warning(
             "Telegram command menu setup failed: {}", type(exc).__name__
         )
+    await configure_mini_app(application.bot, settings.telegram_mini_app_url)
 
 
 async def screen_message_handler(update, context):
@@ -389,10 +450,63 @@ def create_application():
     return application
 
 
-def run_bot():
+async def managed_polling(application, wait_for_stop, on_ready):
+    updater = application.updater
+    stop_requested = asyncio.Event()
+    conflict = None
+
+    def polling_error(error):
+        nonlocal conflict
+        if isinstance(error, Conflict):
+            conflict = error
+            stop_requested.set()
+        else:
+            logger.warning("Telegram polling error: %s", type(error).__name__)
+
+    loop = asyncio.get_running_loop()
+
+    async def poll():
+        async with application:
+            await application.post_init(application)
+            if stop_requested.is_set():
+                return
+            try:
+                await updater.start_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=True,
+                    error_callback=polling_error,
+                )
+                await application.start()
+                if not stop_requested.is_set():
+                    on_ready()
+                await stop_requested.wait()
+            finally:
+                try:
+                    if updater.running:
+                        await updater.stop()
+                finally:
+                    if application.running:
+                        await application.stop()
+
+    wait_for_stop(lambda: loop.call_soon_threadsafe(stop_requested.set))
+    await poll()
+    if conflict is not None:
+        raise conflict
+
+
+def run_bot(*, watch_for_stop=None, on_ready=None):
     application = create_application()
-    print("OPS Bot · private authorized chats · button-driven operations")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    # Regenerating a token leaves the bot ID intact.
+    bot_id = application.bot.token.partition(":")[0]
+    lock_name = sha256(bot_id.encode()).hexdigest()
+    with windows_instance(f"Global\\OPSBot.Polling.{lock_name}"):
+        if watch_for_stop is None:
+            print("OPS Bot · private authorized chats · button-driven operations")
+            application.run_polling(
+                allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+            )
+        else:
+            asyncio.run(managed_polling(application, watch_for_stop, on_ready))
 
 
 if __name__ == "__main__":

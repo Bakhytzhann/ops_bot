@@ -47,7 +47,7 @@ def session():
         "flights": [f],
         "snapshots": {0: snapshot},
         "start": "2026-12-29",
-        "end": "2026-12-31",
+        "end": "2027-01-04",
         "complete": True,
     }
     return SimpleNamespace(
@@ -56,15 +56,20 @@ def session():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("days,end", [(7, "2027-01-07"), (30, "2027-01-30")])
-async def test_next_window_crosses_year(identity, session, monkeypatch, days, end):
+@pytest.mark.parametrize(
+    "direction,start,end",
+    [("next", "2027-01-05", "2027-01-11"), ("prev", "2026-12-22", "2026-12-28")],
+)
+async def test_next_window_crosses_year(
+    identity, session, monkeypatch, direction, start, end
+):
     query = AsyncMock(return_value={"flights": [], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     old = session.bot_data["weekly_flight_lists"]["token"]
     old["preferences"] = {"time": "LT", "codes": "IATA"}
-    u = update(data=f"sk:token:{days}")
+    u = update(data=f"sk:token:{direction}")
     await bot.handle_button(u, session)
-    query.assert_awaited_once_with("2027-01-01", end)
+    query.assert_awaited_once_with(start, end)
     new = list(session.bot_data["weekly_flight_lists"].values())[-1]
     assert new["preferences"] == old["preferences"]
     assert "нет рейсов" in u.callback_query.edit_message_text.call_args.args[0]
@@ -75,7 +80,7 @@ async def test_refresh_preserves_period(identity, session, monkeypatch):
     query = AsyncMock(return_value={"flights": [], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     await browser.handle_selection(update(data="sk:token:refresh"), session)
-    query.assert_awaited_once_with("2026-12-29", "2026-12-31")
+    query.assert_awaited_once_with("2026-12-29", "2027-01-04")
 
 
 @pytest.mark.asyncio
@@ -104,8 +109,8 @@ async def test_session_toggles_survive_card_details_and_back(
         )
     back = update(data="wk:token:0")
     await browser.handle_selection(back, session)
-    markup = back.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
-    assert any("TAS 1700 LT" in b.text for row in markup.inline_keyboard for b in row)
+    text = back.callback_query.edit_message_text.call_args.args[0]
+    assert "TAS 1700 LT" in text
     load.assert_not_awaited()
     model.assert_not_awaited()
     # A fresh SKED must not inherit another screen's preferences.

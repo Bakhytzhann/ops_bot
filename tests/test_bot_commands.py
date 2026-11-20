@@ -178,22 +178,6 @@ def test_persistent_keyboard_has_six_actions():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "label", ["GROUND STATUS", "OPS BRIEF", "CHARTER CHECK", "ANALYTICS"]
-)
-async def test_unimplemented_quick_actions_do_not_call_model_or_api(
-    context, monkeypatch, label
-):
-    direct = AsyncMock()
-    monkeypatch.setattr(bot, "execute_command", direct)
-    update = update_for(label)
-    await bot.handle_message(update, context)
-    assert "пока не подключена" in update.effective_message.reply_text.call_args.args[0]
-    direct.assert_not_awaited()
-    agent.chat.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_old_search_button_is_not_accepted(context):
     update = update_for("Поиск")
     await bot.handle_message(update, context)
