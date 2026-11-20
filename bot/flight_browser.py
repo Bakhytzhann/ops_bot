@@ -187,6 +187,9 @@ async def select_sked_number(update, context):
         main_screen=getattr(update, "main_screen", None),
     )
     await handle_selection(proxy, context)
+    screen = getattr(update, "main_screen", None)
+    if screen is not None and screen.generation != context.user_data.get("screen_generation", 0):
+        return
     # Never remove a numeric input until the selected card has been displayed.
     bot = getattr(context, "bot", None)
     if bot is not None and getattr(update.effective_message, "message_id", None):
@@ -616,6 +619,8 @@ def card_keyboard(
         rows = [
             [button("CREW / FDP", "prepcrew"), button("WX / TAF", "prepwx")],
             [button("NOTAM", "prepnotams"), button("Briefing", "prepbriefing")],
+            *([[button("DEP NOTAM", "nlD_A"), button("ARR NOTAM", "nlA_A")]]
+              if snapshot.blocks.get("briefing") else []),
             preference_buttons(token, preferences or {}, position=position),
             [button("← К рейсу", "card")],
         ]
