@@ -1,4 +1,3 @@
-from copy import deepcopy
 from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -31,13 +30,18 @@ def test_combined_switch_and_legacy_callbacks_toggle_both_settings(key):
     assert preferences == {"time": "Z", "codes": "ICAO"}
 
 
-def test_card_uses_freed_button_for_cached_briefing_link(card):
+def test_briefing_is_only_available_within_preparation(card):
     url = "https://docs.example.test/briefing?signature=test"
     card.blocks["briefing"] = SourceBlock("ForeFlight", details={"url": url})
-    row = browser.card_keyboard(card, "token", 0).inline_keyboard[2]
-    assert [button.text for button in row] == ["LT · IATA", "Briefing"]
-    assert row[0].callback_data == "fc:token:0:view:0"
-    assert row[1].url == url and row[1].callback_data is None
+    main = browser.card_keyboard(card, "token", 0)
+    assert not any(
+        button.url for row in main.inline_keyboard for button in row
+    )
+    prep = browser.card_keyboard(card, "token", 0, action="prep")
+    assert any(
+        button.callback_data == "fc:token:0:prepbriefing:0"
+        for row in prep.inline_keyboard for button in row
+    )
 
 
 @pytest.mark.asyncio
@@ -75,11 +79,11 @@ async def test_switch_is_shared_between_sked_and_card_without_reload(card, monke
     )
     loader.assert_not_awaited()
 
-
 @pytest.mark.asyncio
-async def test_missing_briefing_shows_notice_without_requests_or_edits(
-    card, monkeypatch
-):
+async def test_briefing_is_loaded_only_after_preparation_click(card, monkeypatch):
+    from services import flight_foreflight
+
+    card.blocks.pop("briefing", None)
     listing = {
         "scope": (42, None),
         "expires": monotonic() + 60,
@@ -89,19 +93,23 @@ async def test_missing_briefing_shows_notice_without_requests_or_edits(
     context = SimpleNamespace(
         bot_data={"weekly_flight_lists": {"token": listing}}, user_data={}
     )
-    row = browser.card_keyboard(card, "token", 0).inline_keyboard[2]
-    assert row[1].text == "Briefing"
-    assert row[1].callback_data == "fc:token:0:briefing:0"
-    loader = AsyncMock()
-    monkeypatch.setattr(browser, "load_flight_snapshot", loader)
-    before = deepcopy(context.bot_data)
-    event = update(data=row[1].callback_data)
+    load = AsyncMock(return_value={
+        "briefing": SourceBlock(
+            "ForeFlight", "Briefing",
+            details={"url": "https://example.test/test.pdf"},
+        )
+    })
+    monkeypatch.setattr(flight_foreflight, "load_foreflight", load)
+    prepare = update(data="fc:token:0:prep:0")
+    await bot.handle_button(prepare, context)
+    load.assert_not_awaited()
+    event = update(data="fc:token:0:prepbriefing:0")
     await bot.handle_button(event, context)
-    event.callback_query.answer.assert_awaited_once_with(
-        "Брифинг ForeFlight недоступен. Нажмите REFRESH.",
-        show_alert=True,
+    load.assert_awaited_once_with(card.flight)
+    text = event.callback_query.edit_message_text.call_args.args[0]
+    assert "BRIEFING" in text
+    markup = event.callback_query.edit_message_text.call_args.kwargs["reply_markup"]
+    assert any(
+        button.url == "https://example.test/test.pdf"
+        for row in markup.inline_keyboard for button in row
     )
-    event.callback_query.edit_message_text.assert_not_awaited()
-    event.effective_message.reply_text.assert_not_awaited()
-    loader.assert_not_awaited()
-    assert context.bot_data == before
