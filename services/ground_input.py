@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.ai_analysis import AnalysisUnavailable, request_analysis
+class GroundModelUnavailable(RuntimeError):
+    """Qwen did not return a usable interpretation."""
+
 
 KINDS = {
     "LANDING", "IN_BLOCK", "CHOCKS_ON", "CHOCKS_OFF",
@@ -76,10 +78,14 @@ async def parse_ground_input(text, scope, *, now=None):
     if not 1 <= len(text.strip()) <= 600:
         raise ValueError("Введите короткую вводную до 600 символов.")
     now = now or datetime.now(UTC)
-    parsed = await request_analysis(
+    from services.ai_analysis import AnalysisUnavailable, request_analysis
+    try:
+        parsed = await request_analysis(
         {"input": text}, ("ground_input", scope),
         system_prompt=PROMPT, response_model=GroundInput,
-    )
+        )
+    except AnalysisUnavailable as exc:
+        raise GroundModelUnavailable(str(exc)) from exc
     if parsed.kind not in KINDS | INTERVALS.keys():
         raise ValueError("Не удалось определить событие. Уточните вводную.")
     if parsed.flight and not re.fullmatch(r"[A-Za-z0-9 -]{2,20}", parsed.flight):
