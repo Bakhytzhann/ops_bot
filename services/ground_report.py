@@ -1,4 +1,5 @@
 """Concise, source-limited station history interpretation; run only on demand."""
+
 import hashlib
 import json
 
@@ -52,10 +53,12 @@ async def interpret_station(report):
     if digest in _RESULT_CACHE:
         return _RESULT_CACHE[digest]
     from services.ai_analysis import request_analysis
+
     result = await request_analysis(
         payload,
         ("station_report", report["station"]),
-        system_prompt=SYSTEM, response_model=StationInterpretation,
+        system_prompt=SYSTEM,
+        response_model=StationInterpretation,
     )
     if len(_RESULT_CACHE) >= 64:
         _RESULT_CACHE.pop(next(iter(_RESULT_CACHE)))
