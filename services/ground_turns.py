@@ -274,15 +274,21 @@ class GroundTurnStore:
             raise ValueError("Неверный автор наземного события.")
         base = _identifier(request_id, r"[A-Za-z0-9:_-]{1,140}")
         if not 1 <= len(entries) <= 4:
-            raise ValueError("В одной вводной допускается от одного до четырёх событий.")
+            raise ValueError(
+                "В одной вводной допускается от одного до четырёх событий."
+            )
         metadata = _metadata(turn)
         prepared = []
         for index, (kind, event_at, detail) in enumerate(entries):
             if kind not in KINDS:
                 raise ValueError("Неизвестный этап наземного обслуживания.")
             prepared.append(
-                (kind, _timestamp(event_at), _event_detail(kind, detail),
-                 f"{base}:{index}")
+                (
+                    kind,
+                    _timestamp(event_at),
+                    _event_detail(kind, detail),
+                    f"{base}:{index}",
+                )
             )
         recorded_at = _timestamp(datetime.now(UTC))
         count = 0
@@ -295,8 +301,15 @@ class GroundTurnStore:
                           request_id,detail)
                        VALUES (?,?,?,?,?,'telegram',?,?)
                        ON CONFLICT(turn_key,request_id) DO NOTHING""",
-                    (metadata[0], kind, event_at, actor_id, recorded_at,
-                     unique_id, detail),
+                    (
+                        metadata[0],
+                        kind,
+                        event_at,
+                        actor_id,
+                        recorded_at,
+                        unique_id,
+                        detail,
+                    ),
                 )
                 count += result.rowcount
         return count
@@ -419,9 +432,24 @@ class GroundTurnStore:
         critical_notes = []
         total = 0
         critical_terms = (
-            "разлив", "разлил", "утечк", "поврежден", "повреждён", "поврежд", "зацеп", "наезд", "опасн",
-            "столкнов", "удар", "пожар", "травм", "spill",
-            "damage", "collision", "incident", "safety",
+            "разлив",
+            "разлил",
+            "утечк",
+            "поврежден",
+            "повреждён",
+            "поврежд",
+            "зацеп",
+            "наезд",
+            "опасн",
+            "столкнов",
+            "удар",
+            "пожар",
+            "травм",
+            "spill",
+            "damage",
+            "collision",
+            "incident",
+            "safety",
         )
         for row in rows:
             detail = json.loads(row["detail"])
@@ -445,9 +473,15 @@ class GroundTurnStore:
             tours[row["turn_key"]][row["kind"]] = row["event_at"]
         metrics = {
             "Заправка": _summary(_durations(tours, "FUEL_STARTED", "FUEL_COMPLETED")),
-            "Ожидание ТЗ": _summary(_durations(tours, "FUEL_REQUESTED", "FUEL_TRUCK_ARRIVED")),
-            "Посадка пассажиров": _summary(_durations(tours, "BOARDING_STARTED", "BOARDING_COMPLETED")),
-            "Высадка пассажиров": _summary(_durations(tours, "PAX_OFF_STARTED", "PAX_OFF_COMPLETED")),
+            "Ожидание ТЗ": _summary(
+                _durations(tours, "FUEL_REQUESTED", "FUEL_TRUCK_ARRIVED")
+            ),
+            "Посадка пассажиров": _summary(
+                _durations(tours, "BOARDING_STARTED", "BOARDING_COMPLETED")
+            ),
+            "Высадка пассажиров": _summary(
+                _durations(tours, "PAX_OFF_STARTED", "PAX_OFF_COMPLETED")
+            ),
             "Время на земле": _summary(_durations(tours, "IN_BLOCK", "OUT_BLOCK")),
         }
         frequency = Counter(kind for events in tours.values() for kind in events)
