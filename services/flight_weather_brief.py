@@ -1,7 +1,7 @@
 """Conservative compact METAR facts for Flight Card, not an approach assessment."""
 import re
 
-from services.flight_weather import grouped_reports, station_label, station_roles
+from services.flight_weather import grouped_reports, station_label
 
 
 def _weather(raw):
