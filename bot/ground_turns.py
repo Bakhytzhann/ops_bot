@@ -570,15 +570,11 @@ async def handle_ground_text(update, context):
     if not explicit and not (state and state.get("enabled") and state.get("current") is not None):
         return
     try:
-        model_flight, records = await parse_ground_input(
+        _, records = await parse_ground_input(
             text, (update.effective_chat.id, update.effective_user.id)
         )
-        if model_flight and not explicit:
-            # Reject imagined flight identities; only an explicit written number
-            # or the currently selected card may be used.
-            if not re.search(r"\b" + re.escape(model_flight) + r"\b", text, re.IGNORECASE):
-                raise ValueError("Не удалось уверенно определить рейс.")
-            explicit = re.sub(r"[\s-]", "", model_flight).upper()
+        # Only a flight number explicitly placed at the start of the message
+        # can override the selected card. Never trust an inferred model ID.
 
         if not state or (explicit and not state.get("cards")):
             snapshot = await load_ground_flights()
