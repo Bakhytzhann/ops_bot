@@ -14,6 +14,11 @@ from config.settings import settings
 KINDS = frozenset(
     {
         "IN_BLOCK",
+        "LANDING",
+        "TAKEOFF",
+        "PAX_OFF_STARTED",
+        "PAX_OFF_COMPLETED",
+        "NOTE",
         "OUT_BLOCK",
         "CHOCKS_ON",
         "CHOCKS_OFF",
@@ -205,32 +210,8 @@ class GroundTurnStore:
         now = _timestamp(datetime.now(UTC))
         with self._connect() as conn:
             self._observe(conn, metadata, now)
-            inbound_id = None
-            if turn.get("actual_in") is not None and turn.get("inbound_id") is not None:
-                stored = conn.execute(
-                    "SELECT inbound_id FROM ground_turn_sessions WHERE turn_key=?",
-                    (turn["key"],),
-                ).fetchone()
-                if stored["inbound_id"] == turn["inbound_id"]:
-                    inbound_id = stored["inbound_id"]
-            for kind, field, flight_id in (
-                ("IN_BLOCK", "actual_in", inbound_id),
-                ("OUT_BLOCK", "actual_out", turn.get("outbound_id")),
-            ):
-                if flight_id is None or turn.get(field) is None:
-                    continue
-                at = _timestamp(turn[field])
-                if at > now:
-                    continue
-                conn.execute(
-                    """
-                    INSERT INTO ground_turn_events
-                        (turn_key,kind,event_at,actor_id,recorded_at,source,request_id,detail)
-                    VALUES (?,?,?,NULL,?,'leon',?,'{}')
-                    ON CONFLICT(turn_key,request_id) DO NOTHING
-                    """,
-                    (turn["key"], kind, at, now, f"leon:{kind}:{flight_id}:{at}"),
-                )
+            # Leon supplies flight identity and schedule only. Operational facts
+            # must be explicitly entered by an operator.
 
     def baseline(self, turn_key):
         with self._connect() as conn:
@@ -383,6 +364,65 @@ class GroundTurnStore:
             "fuel_duration": _summary(_durations(tours, *FUEL_DURATION)),
             "fuel_wait": _summary(_durations(tours, *FUEL_WAIT)),
             "blocker_counts": dict(sorted(blockers.items())),
+        }
+
+    def station_report(self, station, *, days=180):
+        """Manual-only metrics; corrections use the newest event for each kind."""
+        from datetime import timedelta
+
+        since = _timestamp(datetime.now(UTC) - timedelta(days=days))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT event.turn_key, event.kind, event.event_at, event.detail,
+                          event.recorded_at, session.first_seen_at
+                   FROM ground_turn_events event
+                   JOIN ground_turn_sessions session ON session.turn_key=event.turn_key
+                   WHERE session.station=? AND event.source='telegram'
+                   ORDER BY event.id""",
+                (station,),
+            ).fetchall()
+        tours = defaultdict(dict)
+        recent_notes = []
+        critical_notes = []
+        total = 0
+        critical_terms = (
+            "разлив", "топлив", "поврежден", "повреждён", "зацеп",
+            "столкнов", "удар", "пожар", "травм", "spill",
+            "damage", "collision", "incident", "safety",
+        )
+        for row in rows:
+            detail = json.loads(row["detail"])
+            if row["kind"] == "NOTE":
+                note = detail.get("text", "").strip()
+                if not note:
+                    continue
+                item = {"date": row["event_at"][:10], "text": note[:500]}
+                if row["event_at"] >= since:
+                    recent_notes.append(item)
+                if any(word in note.casefold() for word in critical_terms):
+                    critical_notes.append(item)
+                continue
+            if row["event_at"] < since:
+                continue
+            total += 1
+            tours[row["turn_key"]][row["kind"]] = row["event_at"]
+        metrics = {
+            "Заправка": _summary(_durations(tours, "FUEL_STARTED", "FUEL_COMPLETED")),
+            "Ожидание ТЗ": _summary(_durations(tours, "FUEL_REQUESTED", "FUEL_TRUCK_ARRIVED")),
+            "Посадка пассажиров": _summary(_durations(tours, "BOARDING_STARTED", "BOARDING_COMPLETED")),
+            "Высадка пассажиров": _summary(_durations(tours, "PAX_OFF_STARTED", "PAX_OFF_COMPLETED")),
+            "Время на земле": _summary(_durations(tours, "IN_BLOCK", "OUT_BLOCK")),
+        }
+        return {
+            "station": station,
+            "days": days,
+            "turns": len(tours),
+            "events": total,
+            "metrics": metrics,
+            "notes": recent_notes[-45:],
+            "critical": critical_notes[-30:],
+            "note_count": len(recent_notes),
+            "critical_count": len(critical_notes),
         }
 
     def fuel_stats(self, station, aircraft_type=None, *, exclude_turn=None):
