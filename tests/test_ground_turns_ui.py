@@ -21,9 +21,7 @@ def _click(button):
 
 def _buttons(call):
     return [
-        button
-        for row in call.kwargs["reply_markup"].inline_keyboard
-        for button in row
+        button for row in call.kwargs["reply_markup"].inline_keyboard for button in row
     ]
 
 
@@ -65,10 +63,13 @@ async def test_ground_card_only_offers_time_statistics_and_back(monkeypatch):
     await ui.ground_turn_callback(opened, context)
     card = _buttons(opened.callback_query.edit_message_text.call_args)
     assert [button.text for button in card] == [
-        "LT", "Статистика станции", "← К рейсам"
+        "LT",
+        "Статистика станции",
+        "← К рейсам",
     ]
-    assert "Пока нет ручных отметок" in (
-        opened.callback_query.edit_message_text.call_args.args[0]
+    assert (
+        "Пока нет ручных отметок"
+        in (opened.callback_query.edit_message_text.call_args.args[0])
     )
     assert context.user_data[ui.STATE_KEY]["current"] == 0
     load.assert_awaited_once_with(refresh=False)
@@ -77,16 +78,33 @@ async def test_ground_card_only_offers_time_statistics_and_back(monkeypatch):
 def test_latest_manual_correction_and_notes_are_visible():
     when = datetime(2026, 11, 18, 12, 45, tzinfo=UTC)
     events = [
-        {"id": 1, "kind": "LANDING", "event_at": when,
-         "source": "telegram", "detail": {}},
-        {"id": 2, "kind": "LANDING", "event_at": when.replace(minute=48),
-         "source": "telegram", "detail": {}},
-        {"id": 3, "kind": "NOTE", "event_at": when,
-         "source": "telegram", "detail": {"text": "ТЗ прибыл поздно"}},
+        {
+            "id": 1,
+            "kind": "LANDING",
+            "event_at": when,
+            "source": "telegram",
+            "detail": {},
+        },
+        {
+            "id": 2,
+            "kind": "LANDING",
+            "event_at": when.replace(minute=48),
+            "source": "telegram",
+            "detail": {},
+        },
+        {
+            "id": 3,
+            "kind": "NOTE",
+            "event_at": when,
+            "source": "telegram",
+            "detail": {"text": "ТЗ прибыл поздно"},
+        },
     ]
     turn = {
-        "station": "UAAA", "registration": "UP-ABC",
-        "inbound_id": 1, "inbound_number": "ABC123",
+        "station": "UAAA",
+        "registration": "UP-ABC",
+        "inbound_id": 1,
+        "inbound_number": "ABC123",
     }
     card = ui._card_text(turn, events)
     assert "12:48Z" in card
