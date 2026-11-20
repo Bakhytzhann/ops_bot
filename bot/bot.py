@@ -338,7 +338,7 @@ async def _handle_message(update, context):
         except ValueError as exc:
             await message.reply_text(str(exc))
         return
-    if not command and ground_text_accepted(context, text):
+    if not command and not pending_reply(update, context) and ground_text_accepted(context, text):
         await handle_ground_text(update, context)
         return
     if command:
