@@ -33,6 +33,7 @@ class GroundInput(BaseModel):
     start: str = Field(max_length=24)
     end: str = Field(max_length=24)
     note: str = Field(max_length=500)
+    critical: bool = False
 
 
 PROMPT = """Распознай короткую наземную вводную оператора. Ответ только JSON по схеме.
@@ -48,6 +49,9 @@ IN_BLOCK/CHOCKS_ON - на стоянке/колодки установлены, 
 Для интервалов в форме 1310/1345 выбирай FUEL, BOARDING или PAX_OFF.
 start и end: исходные времена из текста HHMM, HH:MM, HHMMZ или YYYY-MM-DD HH:MM.
 Для одиночного события заполни только start. Для NOTE оба времени пустые.
+Если времени события нет, всегда выбирай NOTE, даже если упомянут этап.
+critical: true только для явно описанного опасного происшествия (повреждение ВС,
+контакт с техникой, разлив топлива, пожар, травма). Не путай с обычной задержкой.
 note: только относящийся к событию комментарий либо весь текст свободной заметки.
 Не переименовывай и не улучшай свободные заметки. Если тип события неясен — NOTE.
 Если явно указанного времени события нет, не выдумывай его.
@@ -94,7 +98,7 @@ async def parse_ground_input(text, scope, *, now=None):
     if parsed.kind == "NOTE":
         if parsed.start or parsed.end:
             raise ValueError("Уточните, к какому этапу относится время.")
-        records.append(("NOTE", now, {"text": parsed.note or text.strip()}))
+        records.append(("NOTE", now, {"text": parsed.note or text.strip(), "critical": parsed.critical}))
     elif parsed.kind in INTERVALS:
         if not parsed.start or not parsed.end:
             raise ValueError("Укажите начало и конец через /, например 1310/1345.")
@@ -111,5 +115,5 @@ async def parse_ground_input(text, scope, *, now=None):
             raise ValueError("Укажите одно время UTC, например «колодки 1251Z».")
         records.append((parsed.kind, _event_time(parsed.start, now), {}))
     if parsed.note and parsed.kind != "NOTE":
-        records.append(("NOTE", now, {"text": parsed.note}))
+        records.append(("NOTE", now, {"text": parsed.note, "critical": parsed.critical}))
     return parsed.flight.strip().upper(), records
