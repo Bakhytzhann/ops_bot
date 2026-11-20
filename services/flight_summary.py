@@ -142,7 +142,10 @@ def render_card(snapshot, preferences=None):
         compact = [
             part.strip()
             for part in summary.splitlines()
-            if any(key in part for key in ("Duty по графику", "Reporting duty interval", "Rest Before"))
+            if any(
+                key in part
+                for key in ("Duty по графику", "Reporting duty interval", "Rest Before")
+            )
         ]
         if compact:
             lines.append("DUTY / REST · " + " | ".join(compact[:4]))
@@ -157,9 +160,11 @@ def render_card(snapshot, preferences=None):
         lines.append("FDP / NEXT EOBT · загружается / нет данных")
     hotels = crew.details.get("hotels", []) if crew else []
     lines.append(
-        "HOTEL · " + (
+        "HOTEL · "
+        + (
             " | ".join(f"{item['position']}: {item['name']}" for item in hotels)
-            if hotels else "нет подтверждённых данных"
+            if hotels
+            else "нет подтверждённых данных"
         )
     )
 
