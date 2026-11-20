@@ -1,7 +1,6 @@
 """Concise, source-limited station history interpretation; run only on demand."""
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.ai_analysis import AnalysisUnavailable, request_analysis
 
 
 class StationInterpretation(BaseModel):
@@ -35,6 +34,7 @@ async def interpret_station(report):
     ]
     if not notes and not critical:
         return None
+    from services.ai_analysis import request_analysis
     return await request_analysis(
         {"station": report["station"], "recent_notes": notes,
          "critical_notes": critical},
