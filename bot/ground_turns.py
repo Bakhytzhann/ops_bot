@@ -4,6 +4,8 @@ import asyncio
 import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from secrets import token_hex
 
 from httpx import HTTPError
@@ -14,6 +16,9 @@ from bot.message_edits import edit_message_text
 from services.ground_flights import load_ground_flights
 from services.ground_timing import choose_remark, station_remarks, turn_timing
 from services.ground_turns import ground_turns
+from services.ground_input import parse_ground_input
+from services.ground_report import interpret_station
+from services.ai_analysis import AnalysisUnavailable
 from services.snapshot_models import utc, zulu
 
 CATEGORIES = {"active": "Актуальные", "recent": "Недавние", "clarify": "Уточнить"}
@@ -92,6 +97,8 @@ async def show_ground_turns(update, context, *, refresh=False):
         "snapshot": None,
         "view": ("active", 0),
         "pending": None,
+        "current": None,
+        "local": False,
     }
     context.user_data[STATE_KEY] = state
     await _render(update, "GROUND STATUS · Загружаю актуальные рейсы Leon…", [])
@@ -198,94 +205,163 @@ def _back(state):
     return _button(state, "← К рейсам", "list", category, page)
 
 
-def _variance(label, value):
-    return f"{label} {value:+g} мин" if value is not None else ""
+
+@lru_cache(maxsize=1)
+def _airport_catalog():
+    import airportsdata
+    return airportsdata.load("ICAO")
 
 
-def _card_text(turn, timing, remark):
-    lines = [f"GROUND STATUS · {_label(turn)}"]
-    if turn.get("inbound_number") and turn.get("outbound_number"):
-        lines.append(f"{turn['inbound_number']} → {turn['outbound_number']}")
-    lines.extend(
-        [
-            f"Исходный план ухода {_stamp(timing['baseline_out'])} · цель {_stamp(timing['target'])}",
-            f"На стоянке {_stamp(timing['in'])}",
-            f"Готовность не раньше {_stamp(timing['ready_not_before'])} · "
-            f"доложена готовность {_stamp(timing['ready'])}",
-            f"Факт ухода {_stamp(timing['out'])}",
-        ]
-    )
-    if turn.get("estimated_landing") and not turn.get("actual_in"):
-        lines.append(f"Ожидаемая посадка {_stamp(turn['estimated_landing'])}")
-    if turn.get("estimated_out") and not timing["out"]:
-        lines.append(f"Оценка ухода Leon {_stamp(turn['estimated_out'])}")
-    if timing.get("unknown_blockers"):
-        lines.append("У части препятствий срок неизвестен или устарел.")
-    if timing["risk_minutes"] is not None and timing["risk_minutes"] > 0:
-        lines.append(f"Риск к цели +{timing['risk_minutes']:g} мин")
-    variances = [
-        _variance("Уход от плана", timing.get("departure_delta_minutes")),
-        _variance("Привезено", timing["inbound_delta_minutes"]),
-        _variance("На станции", timing["station_delta_minutes"]),
+def _stamp_for(value, station, local=False):
+    if isinstance(value, str):
+        value = utc(value)
+    if not value:
+        return "—"
+    if not local:
+        return value.astimezone(UTC).strftime("%H:%MZ")
+    try:
+        timezone = _airport_catalog()[station]["tz"]
+        return value.astimezone(ZoneInfo(timezone)).strftime("%H:%M LT")
+    except (KeyError, ValueError, ZoneInfoNotFoundError):
+        return value.astimezone(UTC).strftime("%H:%MZ")
+
+
+ARRIVAL_EVENTS = (
+    ("LANDING", "Landing"),
+    ("IN_BLOCK", "On-block"),
+    ("CHOCKS_ON", "Chocks on"),
+    ("PAX_OFF_STARTED", "PAX off started"),
+    ("PAX_OFF_COMPLETED", "PAX off completed"),
+)
+DEPARTURE_EVENTS = (
+    ("FUEL_REQUESTED", "Fuel requested"),
+    ("FUEL_TRUCK_ARRIVED", "Fuel truck"),
+    ("FUEL_STARTED", "Fuel started"),
+    ("FUEL_COMPLETED", "Fuel completed"),
+    ("CABIN_READY", "Cabin ready"),
+    ("HANDLING_READY", "Handling ready"),
+    ("DOCUMENTS_READY", "Documents ready"),
+    ("BOARDING_STARTED", "Boarding started"),
+    ("BOARDING_COMPLETED", "Boarding completed"),
+    ("PAX_ON_BOARD", "PAX on board"),
+    ("REPORTED_READY", "Ready"),
+    ("CHOCKS_OFF", "Chocks off"),
+    ("OUT_BLOCK", "Off-block"),
+    ("TAKEOFF", "Takeoff"),
+)
+GROUPED_EVENTS = (
+    ("FUEL_STARTED", "FUEL_COMPLETED", "Fuel"),
+    ("BOARDING_STARTED", "BOARDING_COMPLETED", "Boarding"),
+    ("PAX_OFF_STARTED", "PAX_OFF_COMPLETED", "PAX off"),
+)
+
+
+def _card_text(turn, events, *, local=False):
+    # Later manual recordings supersede earlier ones; every correction
+    # remains in the append-only audit log.
+    latest = {}
+    notes = []
+    for entry in sorted(events, key=lambda event: event["id"]):
+        if entry.get("source") != "telegram":
+            continue
+        if entry["kind"] == "NOTE":
+            note = (entry.get("detail") or {}).get("text", "").strip()
+            if note:
+                notes.append(note)
+        else:
+            latest[entry["kind"]] = entry["event_at"]
+
+    station = turn["station"]
+    inbound = turn.get("inbound_number")
+    outbound = turn.get("outbound_number")
+    name = f"{inbound} → {outbound}" if inbound and outbound else outbound or inbound or "Рейс"
+    reference = turn.get("planned_in") or turn.get("planned_out")
+    date = _stamp(reference, date=True).split(" ")[0] if reference else ""
+    lines = [
+        f"GROUND STATUS | {station}",
+        name,
+        f"{turn.get('registration') or 'Борт не указан'} · {date} · {'LT' if local else 'UTC'}",
     ]
-    if measured := [part for part in variances if part]:
-        lines.append(" · ".join(measured))
-    if timing["after_ready_minutes"] is not None:
-        lines.append(
-            f"От доклада готовности до ухода {timing['after_ready_minutes']:g} мин"
-        )
-    if timing.get("movement_conflicts"):
-        lines.append(
-            "Времена Leon и отметки сотрудников расходятся. Сверьте события в журнале."
-        )
-    for blocker in timing["blockers"]:
-        process = PROCESSES.get(blocker["process"], blocker["process"])
-        lines.append(
-            f"Ждём · {process} · {blocker.get('reason') or 'причина уточняется'}"
-            f" · прогноз {_stamp(blocker.get('expected_at'))}"
-        )
-    if not timing["blockers"]:
-        lines.append("Открытых препятствий в журнале нет.")
-    if remark:
-        lines.extend(("", f"Опыт станции · {remark}"))
+
+    def section(title, allowed):
+        values = [(key, label) for key, label in allowed if key in latest]
+        if not values:
+            return
+        lines.extend(("", title))
+        handled = set()
+        for first, last, name in GROUPED_EVENTS:
+            if first in latest and last in latest and any(key == first for key, _ in allowed):
+                times = f"{_stamp_for(latest[first], station, local)} / {_stamp_for(latest[last], station, local)}"
+                lines.append(f"{name}: {times}")
+                handled.update((first, last))
+        for key, label in values:
+            if key not in handled:
+                lines.append(f"{label}: {_stamp_for(latest[key], station, local)}")
+
+    if turn.get("inbound_id"):
+        section("ARRIVAL", ARRIVAL_EVENTS)
+    if turn.get("outbound_id"):
+        section("DEPARTURE", DEPARTURE_EVENTS)
+    if not turn.get("inbound_id") and not turn.get("outbound_id"):
+        section("EVENTS", (*ARRIVAL_EVENTS, *DEPARTURE_EVENTS))
+
+    if notes:
+        lines.extend(("", "NOTES", *(f"• {note}" for note in notes[-12:])))
+        if len(notes) > 12:
+            lines.append(f"Ещё {len(notes) - 12} заметок в журнале.")
+    if not latest and not notes:
+        lines.extend(("", "Пока нет ручных отметок.", "Напишите, например: посадка 1245z"))
     return "\n".join(lines)
 
 
 async def _show_card(update, state, index):
     turn = state["cards"][index]
+    if state.get("current") != index:
+        state["local"] = False  # UTC is always the default for each card.
+    state["current"] = index
     await asyncio.to_thread(ground_turns.observe, turn)
-    events, baseline, remarks = await asyncio.gather(
-        asyncio.to_thread(ground_turns.events, turn["key"]),
-        asyncio.to_thread(ground_turns.baseline, turn["key"]),
-        asyncio.to_thread(
-            station_remarks,
-            turn["station"],
-            turn.get("aircraft_type"),
-            exclude_turn=turn["key"],
-        ),
-    )
-    timing = turn_timing(turn, events, baseline=baseline)
+    events = await asyncio.to_thread(ground_turns.events, turn["key"], limit=250)
     rows = [
         [
-            _button(state, "Отметить этап", "events", index),
-            _button(state, "Сообщить задержку", "block", index),
+            _button(state, "UTC" if state.get("local") else "LT", "tz", index),
+            _button(state, "Статистика станции", "stats", index),
         ],
-        [
-            _button(state, "Чек-лист", "check", index),
-            _button(state, "Опыт станции", "history", index),
-        ],
-        [
-            _button(state, "Журнал", "timeline", index),
-            _button(state, "↻ Статус", "open", index),
-        ],
+        [_back(state)],
     ]
-    if turn.get("outbound_id"):
-        rows.append(
-            [_button(state, "Уточнить цель UTC", "target", index), _back(state)]
-        )
+    await _render(update, _card_text(turn, events, local=state.get("local", False)), rows)
+
+
+async def _show_station_stats(update, state, index):
+    station = state["cards"][index]["station"]
+    report = await asyncio.to_thread(ground_turns.station_report, station)
+    lines = [
+        f"СТАТИСТИКА СТАНЦИИ | {station}",
+        "За последние 180 дней · ручные вводные",
+        f"Рейсов с отметками: {report['turns']} · событий: {report['events']}",
+        f"Заметок: {report['note_count']}",
+        "",
+        "СРЕДНИЕ ВРЕМЕНА",
+    ]
+    for label, metric in report["metrics"].items():
+        if metric["count"]:
+            lines.append(f"{label}: {metric['mean_minutes']:g} мин (n={metric['count']})")
+    if lines[-1] == "СРЕДНИЕ ВРЕМЕНА":
+        lines.append("Пока недостаточно завершённых интервалов.")
+    lines.extend(("", "ПРОБЛЕМЫ И РИСКИ"))
+    try:
+        result = await interpret_station(report)
+    except AnalysisUnavailable:
+        lines.append("Анализ заметок сейчас недоступен. Тайминги показаны выше.")
     else:
-        rows.append([_back(state)])
-    await _render(update, _card_text(turn, timing, remarks[0] if remarks else ""), rows)
+        if result is None or not (result.frequent or result.critical):
+            lines.append("По сохранённым заметкам выводов пока нет.")
+        else:
+            if result.frequent:
+                lines.extend(("Повторяющиеся проблемы:", *(f"• {item}" for item in result.frequent)))
+            if result.critical:
+                lines.extend(("Критичные случаи из истории:", *(f"• {item}" for item in result.critical)))
+            lines.append("Актуальность старых происшествий требует проверки.")
+    await _render(update, "\n".join(lines), [[_return_to_card(state, index)]])
 
 
 def _return_to_card(state, index):
@@ -539,6 +615,8 @@ async def ground_turn_callback(update, context):
         "historyai",
         "target",
         "timeline",
+        "tz",
+        "stats",
     }
     if not (
         selected.isascii()
@@ -560,7 +638,12 @@ async def ground_turn_callback(update, context):
         return
     await query.answer()
     try:
-        if action in {"events", "check"}:
+        if action == "tz":
+            state["local"] = not state.get("local", False)
+            await _show_card(update, state, index)
+        elif action == "stats":
+            await _show_station_stats(update, state, index)
+        elif action in {"events", "check"}:
             await _event_choices(update, state, index, checklist=action == "check")
         elif action == "block":
             await _blockers(update, state, index)
