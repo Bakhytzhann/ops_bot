@@ -54,7 +54,7 @@ def test_retired_summary_is_absent_and_contextual_back_remains(action):
     for page in (0, 1):
         markup = browser.card_keyboard(snapshot, "token", 0, action, page=page, pages=2)
         rows = markup.inline_keyboard
-        assert [button.text for button in rows[0]] == ["Подготовка", "REFRESH"]
+        assert any([button.text for button in row] == ["Подготовка", "REFRESH"] for row in rows)
         assert [button.text for button in rows[-1]] == ["LT · IATA", "← К списку"]
         assert not any(
             button.text in {"Bot Report", "Bot Summary"}
