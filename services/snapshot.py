@@ -8,7 +8,6 @@ from services.crew_format import format_flight_crew
 from services.flight_duty import assigned_members, load_duty
 from services.flight_foreflight_fast import load_fast_foreflight
 from services.flight_summary import render_card
-from services.flight_weather import alternate_reports, station_roles
 from services.operational_routes import selected_flight_weather
 from services.snapshot_models import FlightSnapshot, SourceBlock, utc, zulu
 from services.source_cache import SourceCache
@@ -17,27 +16,34 @@ from services.weather_reports import format_reports
 cache = SourceCache()
 
 
-async def load_flight_snapshot(selected, *, refresh=False, on_update=None):
+async def load_flight_snapshot(
+    selected, *, refresh=False, on_update=None, from_sked=False
+):
     day = str(selected.get("departureUTC") or "")[:10]
 
     async def cached(key, ttl, loader):
         return await cache.get(key, ttl, loader, refresh=refresh)
 
-    schedule = await cached(
-        ("schedule", day),
-        settings.snapshot_schedule_ttl,
-        lambda: get_flight_schedule(day),
-    )
-    matches = [
-        f
-        for f in schedule["flights"]
-        if f.get("flightNid") == selected.get("flightNid")
-    ]
-    if len(matches) != 1:
-        raise ValueError(
-            "Рейс изменён или не найден в актуальном расписании. Обновите SKED."
+    if from_sked and not refresh:
+        # The selected flight was already validated against the Leon SKED.
+        # Do not request the same schedule again just to open its card.
+        flight = selected
+        schedule = {"complete": True}
+    else:
+        schedule = await cached(
+            ("schedule", day),
+            settings.snapshot_schedule_ttl,
+            lambda: get_flight_schedule(day),
         )
-    flight = matches[0]
+        matches = [
+            f for f in schedule["flights"]
+            if f.get("flightNid") == selected.get("flightNid")
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Рейс изменён или не найден в актуальном расписании. Обновите SKED."
+            )
+        flight = matches[0]
     version = tuple(
         str(flight.get(k))
         for k in (
