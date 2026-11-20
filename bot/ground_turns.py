@@ -536,7 +536,7 @@ def ground_text_accepted(context, text):
         text.strip()
         and (
             (state and state.get("enabled") and state.get("current") is not None)
-            or EXPLICIT_FLIGHT.match(text)
+            or (EXPLICIT_FLIGHT.match(text) and text[EXPLICIT_FLIGHT.match(text).end():].strip())
         )
     )
 
