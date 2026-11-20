@@ -137,7 +137,7 @@ async def test_checklist_excludes_other_flights_notes_and_files(monkeypatch):
     )
     monkeypatch.setattr(charter, "call_leon", call)
     tool = charter.CHECKLIST_TOOLS["FLIGHT CARE"]
-    assert await charter._checklist(tool, 15) == {
+    assert await charter.load_flight_checklist(tool, 15) == {
         "count": 1,
         "items": [{"item": "CATERING", "statuses": ["CONFIRMED"]}],
     }

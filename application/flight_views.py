@@ -396,6 +396,10 @@ class FlightViews:
             raise ScheduleUnavailable
         raise FlightNotFound
 
+    async def selected_leg(self, day, flight_id, **selection):
+        leg, _ = await self._select(day, flight_id, **selection)
+        return leg
+
     async def _foreflight_match(self, row, day, *, refresh):
         settings = get_settings()
 

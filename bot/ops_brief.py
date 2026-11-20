@@ -1,7 +1,6 @@
 """Scheduled aircraft positions, upcoming flights and station notes."""
 
 import asyncio
-import re
 from datetime import UTC, datetime, timedelta
 from secrets import token_hex
 from time import monotonic
@@ -10,26 +9,18 @@ from httpx import HTTPError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.admission import require_user
-from bot.charter_check import build_fleet
 from integrations.leon.tools import get_flight_schedule
-from services.snapshot_models import utc, zulu
+from services.fleet_operations import (
+    build_fleet,
+    load_position_notes,
+)
+from services.fleet_operations import current_notes as current_notes
+from services.fleet_operations import station_for_aircraft as station_for_aircraft
+from services.snapshot_models import zulu
 from services.station_notes import notes
 
 PAGE_SIZE = 4
 CACHE_SECONDS = 600
-NOTE_LOOKBACK_DAYS = 30
-MAX_NOTES_PER_STATION = 4
-AIRPORT_PATTERN = re.compile(r"[A-Z]{4}")
-
-
-def station_for_aircraft(item):
-    """Only the latest past scheduled arrival, not a guessed future location."""
-    if item["active"] or item["last"] is None:
-        return None
-    station = item["last"].get("arrival")
-    if not isinstance(station, str) or not AIRPORT_PATTERN.fullmatch(station):
-        return None
-    return station
 
 
 def status_lines(item):
@@ -61,23 +52,6 @@ def next_flight_lines(item):
         f"{flight.get('departure') or '—'} → {flight.get('arrival') or '—'}",
         f"Вылет по Leon: {zulu(flight.get('departureUTC'))}",
     ]
-
-
-def current_notes(rows, now):
-    """Unarchived notes from 30 days; pinned older notes remain visibly dated."""
-    cutoff = now - timedelta(days=NOTE_LOOKBACK_DAYS)
-    selected = []
-    for row in rows:
-        if row.get("status") != "active":
-            continue
-        observed = utc(row.get("observed_at_utc"))
-        if observed is None or observed > now:
-            continue
-        older = observed < cutoff
-        if older and not row.get("pinned"):
-            continue
-        selected.append({**row, "older": older})
-    return selected[:MAX_NOTES_PER_STATION]
 
 
 def note_label(row):
@@ -242,26 +216,7 @@ async def load_ops_brief(user_id):
     if not isinstance(schedule, dict) or not isinstance(schedule.get("flights"), list):
         raise TypeError("Leon schedule missing")
     fleet = build_fleet(schedule, now)
-    stations = sorted(
-        {station for item in fleet if (station := station_for_aircraft(item))}
-    )
-    role = await asyncio.to_thread(notes.role, user_id)
-    notes_access = "ready" if role else "unbound"
-    station_notes = {}
-    if role:
-        slots = asyncio.Semaphore(5)
-
-        async def get_station(station):
-            async with slots:
-                try:
-                    rows = await asyncio.to_thread(notes.list, user_id, station, 20, 0)
-                    return station, current_notes(rows, now)
-                except (ValueError, PermissionError, OSError):
-                    return station, None
-
-        station_notes = dict(
-            await asyncio.gather(*(get_station(station) for station in stations))
-        )
+    notes_access, station_notes = await load_position_notes(fleet, user_id, now, notes)
     return {
         "token": token_hex(5),
         "fleet": fleet,

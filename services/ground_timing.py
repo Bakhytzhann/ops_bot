@@ -123,51 +123,78 @@ def turn_timing(turn, events, *, baseline=None, now=None):
     }
 
 
-def station_remarks(station, aircraft_type, *, exclude_turn=None):
+def station_samples(station, aircraft_type, *, exclude_turn=None, store=None):
     cohorts = []
     if aircraft_type:
-        cohorts.append((station, aircraft_type, f"{station}, {aircraft_type}"))
-    cohorts.append((station, None, f"{station}, все типы ВС"))
+        cohorts.append((station, aircraft_type))
+    cohorts.append((station, None))
     if aircraft_type:
-        cohorts.append((None, aircraft_type, f"по компании, {aircraft_type}"))
-    cohorts.append((None, None, "по компании, все типы ВС"))
+        cohorts.append((None, aircraft_type))
+    cohorts.append((None, None))
+    store = store or ground_turns
+    metrics = ("fuel_duration", "fuel_wait", "ground_duration")
+    samples = {}
+    blocker = None
+    for airport, kind in cohorts:
+        if airport is None and len(samples) == len(metrics):
+            break
+        summary = store.station_history(airport, kind, exclude_turn=exclude_turn)
+        for key in metrics:
+            sample = summary[key]
+            if key not in samples and sample["count"] >= MIN_STATION_SAMPLES:
+                samples[key] = {**sample, "station": airport, "aircraft_type": kind}
+        counts = summary.get("blocker_counts", {})
+        turn_count = summary.get("turn_count", 0)
+        if airport and counts and blocker is None and turn_count >= MIN_STATION_SAMPLES:
+            process = max(counts, key=counts.get)
+            blocker = {
+                "process": process,
+                "count": counts[process],
+                "turn_count": turn_count,
+                "station": airport,
+                "aircraft_type": kind,
+            }
+        if len(samples) == len(metrics) and blocker is not None:
+            break
+    return {key: samples[key] for key in metrics if key in samples}, blocker
+
+
+def station_remarks(station, aircraft_type, *, exclude_turn=None):
+    samples, blocker = station_samples(
+        station, aircraft_type, exclude_turn=exclude_turn
+    )
     metrics = {
         "fuel_duration": "Длительность заправки",
         "fuel_wait": "Ожидание подачи топливной машины",
         "ground_duration": "От постановки до ухода со стоянки",
     }
+
+    def display_scope(item):
+        return f"{item['station'] or 'по компании'}, {item['aircraft_type'] or 'все типы ВС'}"
+
     remarks = {}
-    for airport, kind, scope in cohorts:
-        if airport is None and metrics.keys() <= remarks.keys():
-            break
-        summary = ground_turns.station_history(airport, kind, exclude_turn=exclude_turn)
-        for key, label in metrics.items():
-            sample = summary[key]
-            if key not in remarks and sample["count"] >= MIN_STATION_SAMPLES:
-                remarks[key] = (
-                    f"{label} · {scope}: медиана {sample['median_minutes']:g} мин, "
-                    f"80-й перцентиль {sample['p80_minutes']:g} мин · n={sample['count']}."
-                )
-        counts = summary.get("blocker_counts", {})
-        if airport and counts and "blockers" not in remarks:
-            turn_count = summary.get("turn_count", 0)
-            if turn_count >= MIN_STATION_SAMPLES:
-                process = max(counts, key=counts.get)
-                labels = {
-                    "fuel": "топливо",
-                    "pax": "пассажиры и багаж",
-                    "cabin": "салон",
-                    "handling": "handling",
-                    "documents": "документы",
-                    "other": "другое",
-                }
-                remarks["blockers"] = (
-                    f"Чаще всего отмечали препятствие «{labels.get(process, process)}» "
-                    f"· {scope}: {counts[process]} из {turn_count} оборотов с отметками."
-                )
-        if len(remarks) == len(metrics) + 1:
-            break
-    return [remarks[key] for key in (*metrics, "blockers") if key in remarks]
+    for key, sample in samples.items():
+        label, scope = metrics[key], display_scope(sample)
+        remarks[key] = (
+            f"{label} · {scope}: медиана {sample['median_minutes']:g} мин, "
+            f"80-й перцентиль {sample['p80_minutes']:g} мин · n={sample['count']}."
+        )
+
+    if blocker:
+        process, scope = blocker["process"], display_scope(blocker)
+        labels = {
+            "fuel": "топливо",
+            "pax": "пассажиры и багаж",
+            "cabin": "салон",
+            "handling": "handling",
+            "documents": "документы",
+            "other": "другое",
+        }
+        remarks["blockers"] = (
+            f"Чаще всего отмечали препятствие «{labels.get(process, process)}» "
+            f"· {scope}: {blocker['count']} из {blocker['turn_count']} оборотов с отметками."
+        )
+    return list(remarks.values())
 
 
 class RemarkPriority(BaseModel):

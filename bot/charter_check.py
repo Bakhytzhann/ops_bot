@@ -12,7 +12,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.admission import private_user, require_user
 from bot.message_edits import edit_message_text
-from config.settings import settings
 from integrations.leon.tools import get_flight_crew, get_flight_schedule
 from services.charter_intelligence import (
     charter_request_sources,
@@ -22,9 +21,11 @@ from services.charter_intelligence import (
 )
 from services.charter_recommendations import review_charter
 from services.crew_format import format_flight_crew
+from services.fleet_operations import build_fleet as build_fleet
+from services.fleet_operations import charter_sales_access
 from services.flight_duty import load_duty
 from services.journey_history import journey_history, refresh_journey_history
-from services.snapshot_models import utc, zulu
+from services.snapshot_models import zulu
 
 CACHE_SECONDS = 600
 PAGE_SIZE = 6
@@ -37,59 +38,7 @@ ROUTE_SELECTION = re.compile(
 def can_view_charter_sales(update):
     if not private_user(update):
         return False
-    configured = settings.charter_sales_user_ids.split(",")
-    user_id = update.effective_user.id
-    return user_id in settings.admin_ids or str(user_id) in {
-        part.strip() for part in configured
-    }
-
-
-def build_fleet(schedule, now=None):
-    """Group complete, non-cancelled Leon schedule by actual registration."""
-    now = now or datetime.now(UTC)
-    groups = {}
-    for flight in schedule.get("flights") or []:
-        if not isinstance(flight, dict) or flight.get("cancelled") is True:
-            continue
-        registration = flight.get("aircraft")
-        departure = utc(flight.get("departureUTC"))
-        arrival = utc(flight.get("arrivalUTC"))
-        if not isinstance(registration, str) or not registration.strip():
-            continue
-        if not departure or not arrival or arrival <= departure:
-            continue
-        groups.setdefault(registration.strip().upper(), []).append(flight)
-    result = []
-    for registration, flights in sorted(groups.items()):
-        flights.sort(key=lambda f: utc(f["departureUTC"]))
-        active = next(
-            (
-                f
-                for f in flights
-                if utc(f["departureUTC"]) <= now < utc(f["arrivalUTC"])
-            ),
-            None,
-        )
-        previous = [f for f in flights if utc(f["arrivalUTC"]) <= now]
-        upcoming = [f for f in flights if utc(f["departureUTC"]) > now]
-        last = max(previous, key=lambda f: utc(f["arrivalUTC"])) if previous else None
-        next_flight = (
-            min(upcoming, key=lambda f: utc(f["departureUTC"])) if upcoming else None
-        )
-        result.append(
-            {
-                "registration": registration,
-                "type": next(
-                    (str(f["aircraftType"]) for f in flights if f.get("aircraftType")),
-                    "—",
-                ),
-                "active": active,
-                "last": last,
-                "next": next_flight,
-                "flights": flights,
-            }
-        )
-    return result
+    return charter_sales_access(update.effective_user.id)
 
 
 def position_label(item):

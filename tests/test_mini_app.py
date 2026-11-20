@@ -369,5 +369,5 @@ async def test_bot_menu_is_opt_in():
     bot.set_chat_menu_button.assert_not_called()
     await configure_mini_app(bot, "https://ops.example.test/")
     menu = bot.set_chat_menu_button.call_args.kwargs["menu_button"]
-    assert menu.text == "SKED"
+    assert menu.text == "OPS"
     assert menu.web_app.url == "https://ops.example.test/"

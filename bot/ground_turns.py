@@ -15,7 +15,7 @@ from telegram.error import TelegramError
 
 from bot.admission import require_user
 from bot.message_edits import edit_message_text
-from services.ground_flights import load_ground_flights
+from services.ground_flights import effective_ground_status, load_ground_flights
 from services.ground_input import GroundModelUnavailable, parse_ground_input
 from services.ground_report import interpret_station
 from services.ground_timing import choose_remark, station_remarks, turn_timing
@@ -133,19 +133,9 @@ async def _show_list(update, state, category, page):
     now = datetime.now(UTC)
     selected = []
     for index, turn in enumerate(cards):
-        status = turn["status"]
-        reference = turn.get("reference_time")
-        local_out = utc(local_outs.get(turn["key"]))
-        out = turn.get("actual_out") or local_out
-        if out and out <= now:
-            status = "recent" if now - out <= timedelta(hours=6) else None
-            reference = out
-        if (
-            status in {"active", "recent"}
-            and reference is not None
-            and abs(reference - now) > timedelta(hours=6)
-        ):
-            continue
+        status, reference = effective_ground_status(
+            turn, local_outs.get(turn["key"]), now
+        )
         if status == category:
             selected.append((index, turn, reference))
     pages = max(1, (len(selected) + PAGE_SIZE - 1) // PAGE_SIZE)

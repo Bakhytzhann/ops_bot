@@ -165,15 +165,9 @@ def _recommendations(sources):
     return cards
 
 
-async def review_charter(sources, scope):
+async def _prioritize(cards, scope):
     from services.ai_analysis import AnalysisUnavailable, request_analysis
 
-    cards = _recommendations(sources)
-    if not cards:
-        return (
-            "Откройте оффер Leon или загрузите Journey Log. "
-            "По этим данным можно проверить цену, время и расход для следующего чартера."
-        )
     order = list(cards)
     if len(order) > 1:
         evidence = {
@@ -193,8 +187,22 @@ async def review_charter(sources, scope):
             selected = dict.fromkeys(result.recommendation_ids)
             if selected.keys() <= cards.keys():
                 order = list(selected | dict.fromkeys(order))
+    return order[:3]
+
+
+async def charter_priorities(sources, scope):
+    return await _prioritize(_recommendations(sources), scope)
+
+
+async def review_charter(sources, scope):
+    cards = _recommendations(sources)
+    if not cards:
+        return (
+            "Откройте оффер Leon или загрузите Journey Log. "
+            "По этим данным можно проверить цену, время и расход для следующего чартера."
+        )
     lines = ["CHARTER CHECK · Рекомендации"]
-    for index, key in enumerate(order[:3], 1):
+    for index, key in enumerate(await _prioritize(cards, scope), 1):
         source, title, fact, effect, action = cards[key]
         lines.extend(
             ["", f"{index}. {title} [{source}]", fact, f"Зачем: {effect}", action]

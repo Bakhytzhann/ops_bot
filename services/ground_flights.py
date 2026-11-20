@@ -267,6 +267,23 @@ def _classify(card, now):
     return None
 
 
+def effective_ground_status(turn, local_out, now):
+    status = turn["status"]
+    reference = turn.get("reference_time")
+    local_out = utc(local_out)
+    out = turn.get("actual_out") or local_out
+    if out and out <= now:
+        status = "recent" if now - out <= timedelta(hours=6) else None
+        reference = out
+    if (
+        status in {"active", "recent"}
+        and reference is not None
+        and abs(reference - now) > timedelta(hours=6)
+    ):
+        return None, reference
+    return status, reference
+
+
 async def load_ground_flights(*, now=None, refresh=False):
     """Return active lane, recent movements and stale confirmed arrivals."""
     now = now or datetime.now(UTC)
@@ -284,7 +301,7 @@ async def load_ground_flights(*, now=None, refresh=False):
         return legs, {}, schedule_complete, True, datetime.now(UTC)
 
     legs, watch, schedule_complete, watch_complete, fetched_at = await cache.get(
-        (start, end), CACHE_SECONDS, load, refresh=refresh
+        (start, end), CACHE_SECONDS, load, refresh=refresh, refresh_interval=5
     )
     incoming = _preceding_legs(legs) if schedule_complete else {}
     matched_inbound = {leg["id"] for leg in incoming.values()}

@@ -35,10 +35,10 @@ class AnalyticsPriorities(BaseModel):
         return self
 
 
-async def analyze_metrics(report, scope) -> str:
+async def prioritize_metrics(report, scope):
     metrics = report["metrics"]
     if len(metrics) <= 1:
-        return render_insights(report)
+        return []
 
     from services.ai_analysis import AnalysisUnavailable, request_analysis
 
@@ -68,5 +68,12 @@ async def analyze_metrics(report, scope) -> str:
             response_model=AnalyticsPriorities,
         )
     except AnalysisUnavailable:
-        return render_insights(report)
-    return render_insights(report, priorities=result.priority_ids)
+        return []
+    return result.priority_ids
+
+
+async def analyze_metrics(report, scope) -> str:
+    priorities = await prioritize_metrics(report, scope)
+    if priorities:
+        return render_insights(report, priorities=priorities)
+    return render_insights(report)

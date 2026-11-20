@@ -279,7 +279,7 @@ async def _foreflight_plan(flight):
     }
 
 
-async def _checklist(tool, flight_nid):
+async def load_flight_checklist(tool, flight_nid, *, limit=4):
     data = await call_leon(tool, {"flightNidList": [flight_nid]})
     if isinstance(data, dict):
         data = data.get("result")
@@ -303,7 +303,7 @@ async def _checklist(tool, flight_nid):
                     ],
                 }
             )
-    return {"count": len(items), "items": items[:4]}
+    return {"count": len(items), "items": items[:limit]}
 
 
 async def _optional_source(coroutine):
@@ -322,7 +322,7 @@ async def _booked_evidence(rfq):
     plan, *checklists = await asyncio.gather(
         _optional_source(_foreflight_plan(flight)),
         *(
-            _optional_source(_checklist(CHECKLIST_TOOLS[group], flight_nid))
+            _optional_source(load_flight_checklist(CHECKLIST_TOOLS[group], flight_nid))
             for group in keys
         ),
     )

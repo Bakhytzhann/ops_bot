@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Req
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from api.ops_routes import create_ops_router
 from api.telegram_auth import require_telegram_access
 from application.flight_views import (
     CrewPreparation,
@@ -141,6 +142,7 @@ def create_app():
         day, options = selection
         return await views.notams(day, flight_id, refresh=refresh, **options)
 
+    router.include_router(create_ops_router(views, flight_window))
     app.include_router(router)
 
     @app.get("/health", include_in_schema=False)

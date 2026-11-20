@@ -49,7 +49,7 @@ def verified_launch(init_data, bot_token):
 def require_telegram_access(authorization: Annotated[str | None, Header()] = None):
     scheme, _, init_data = (authorization or "").partition(" ")
     if scheme.lower() != "tma" or not init_data:
-        raise HTTPException(401, "Open SKED from the bot menu in Telegram.")
+        raise HTTPException(401, "Open OPS from the bot menu in Telegram.")
     token = get_settings().telegram_bot_token
     if token is None or not token.get_secret_value():
         raise HTTPException(503, "Telegram access is unavailable.")
@@ -58,9 +58,9 @@ def require_telegram_access(authorization: Annotated[str | None, Header()] = Non
             init_data, token.get_secret_value()
         )
     except (ValueError, RecursionError):
-        raise HTTPException(401, "Session expired or invalid. Reopen SKED.") from None
+        raise HTTPException(401, "Session expired or invalid. Reopen OPS.") from None
     if has_chat or chat_type not in (None, "sender", "private"):
-        raise HTTPException(403, "Open SKED from the private bot chat.")
+        raise HTTPException(403, "Open OPS from the private bot chat.")
     if not access_store.is_allowed(user_id):
         raise HTTPException(403, "This Telegram account does not have OPS access.")
     return user_id
