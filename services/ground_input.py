@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 class GroundModelUnavailable(RuntimeError):
     """Qwen did not return a usable interpretation."""
 
