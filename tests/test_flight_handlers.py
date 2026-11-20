@@ -6,7 +6,6 @@ import pytest
 
 from services import flight_handlers
 
-
 FLIGHT = {
     "flightNid": 101,
     "flightNumber": "ABC101",
