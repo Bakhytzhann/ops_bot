@@ -6,20 +6,20 @@ import sqlite3
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from secrets import token_hex
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from httpx import HTTPError
-from telegram.error import TelegramError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import TelegramError
 
 from bot.admission import require_user
 from bot.message_edits import edit_message_text
 from services.ground_flights import load_ground_flights
-from services.ground_timing import choose_remark, station_remarks, turn_timing
-from services.ground_turns import ground_turns
 from services.ground_input import GroundModelUnavailable, parse_ground_input
 from services.ground_report import interpret_station
+from services.ground_timing import choose_remark, station_remarks, turn_timing
+from services.ground_turns import ground_turns
 from services.snapshot_models import utc, zulu
 
 CATEGORIES = {"active": "Актуальные", "recent": "Недавние", "clarify": "Уточнить"}
@@ -363,7 +363,7 @@ async def _show_station_stats(update, state, index):
     lines.extend(("", "ПРОБЛЕМЫ И РИСКИ"))
     try:
         result = await interpret_station(report)
-    except Exception:  # optional insights must not block numeric statistics
+    except Exception:  # noqa: BLE001 -- optional insights must not block statistics
         lines.append("Анализ заметок сейчас недоступен. Тайминги показаны выше.")
     else:
         if result is None or not (result.frequent or result.critical):
