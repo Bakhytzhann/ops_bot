@@ -140,7 +140,9 @@ def test_card_buttons_exact_and_switch_directions(card):
         ["LT · IATA", "← К списку"],
     ]
     prep = ui.card_keyboard(card, "token", 0, action="prep")
-    assert any(button.text == "Briefing" for row in prep.inline_keyboard for button in row)
+    assert any(
+        button.text == "Briefing" for row in prep.inline_keyboard for button in row
+    )
     buttons = ui.preference_buttons("token", {"time": "LT", "codes": "IATA"})
     assert [b.text for b in buttons] == ["UTC · ICAO"]
 
