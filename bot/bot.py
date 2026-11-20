@@ -36,6 +36,8 @@ from bot.commands import (
 )
 from bot.fleet_docs import fleet_docs_keyboard, fleet_docs_response
 from bot.flight_browser import (
+    accepts_sked_number,
+    select_sked_number,
     handle_selection,
     invalidate_screen,
     is_card_notice_callback,
@@ -107,6 +109,7 @@ def accepts_message(update, context):
             or pending_reply(update, context)
             or has_ground_turn_input(context)
             or ground_text_accepted(context, message.text)
+            or accepts_sked_number(update, context)
         )
     )
 
@@ -326,6 +329,9 @@ async def _handle_message(update, context):
         return
     if not command and has_ground_turn_input(context):
         await handle_ground_turn_input(update, context)
+        return
+    if not command and accepts_sked_number(update, context):
+        await select_sked_number(update, context)
         return
     if not command and ground_text_accepted(context, text):
         await handle_ground_text(update, context)
