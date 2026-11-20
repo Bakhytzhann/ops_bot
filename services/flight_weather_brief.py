@@ -1,4 +1,5 @@
 """Conservative compact METAR facts for Flight Card, not an approach assessment."""
+
 import re
 
 from services.flight_weather import grouped_reports, station_label
@@ -8,8 +9,11 @@ def _weather(raw):
     body = re.split(r"\bRMK\b", raw.upper(), maxsplit=1)[0]
     words = body.split()
     wind = next(
-        (m.group(0) for word in words
-         if (m := re.fullmatch(r"(?:\d{3}|VRB)\d{2,3}(?:G\d{2,3})?(?:KT|MPS)", word))),
+        (
+            m.group(0)
+            for word in words
+            if (m := re.fullmatch(r"(?:\d{3}|VRB)\d{2,3}(?:G\d{2,3})?(?:KT|MPS)", word))
+        ),
         "—",
     )
     vis = next(
@@ -18,19 +22,23 @@ def _weather(raw):
     )
     if "CAVOK" in words:
         vis = "≥10km (CAVOK)"
-    rvr = [word for word in words if re.fullmatch(
-        r"R\d{2}[LCR]?/[MP]?\d{4}(?:V[MP]?\d{4})?(?:FT)?[UDN]?", word
-    )]
+    rvr = [
+        word
+        for word in words
+        if re.fullmatch(r"R\d{2}[LCR]?/[MP]?\d{4}(?:V[MP]?\d{4})?(?:FT)?[UDN]?", word)
+    ]
     vertical = next((word for word in words if re.fullmatch(r"VV\d{3}", word)), None)
-    ceiling = next((word for word in words if re.fullmatch(
-        r"(?:BKN|OVC)\d{3}(?:CB|TCU)?", word
-    )), None)
+    ceiling = next(
+        (word for word in words if re.fullmatch(r"(?:BKN|OVC)\d{3}(?:CB|TCU)?", word)),
+        None,
+    )
     temp = next(
         (word for word in words if re.fullmatch(r"M?\d{2}/(?:M?\d{2}|//)", word)),
         None,
     )
     phenomena = [
-        word for word in words
+        word
+        for word in words
         if re.fullmatch(
             r"(?:\+|-|VC)?(?:TS|SH|FZ)?(?:RA|SN|DZ|SG|PL|GR|GS|BR|FG|HZ|FU|DU|SA)+",
             word,
@@ -53,7 +61,8 @@ def _weather(raw):
 def concise_weather(snapshot, preferences=None):
     reports = (
         snapshot.blocks.get("weather").details.get("reports", [])
-        if snapshot.blocks.get("weather") else []
+        if snapshot.blocks.get("weather")
+        else []
     )
     lines = ["WX · CURRENT METAR"]
     for station in (snapshot.flight.get("departure"), snapshot.flight.get("arrival")):
