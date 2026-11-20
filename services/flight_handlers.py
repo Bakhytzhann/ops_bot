@@ -134,9 +134,7 @@ def format_handlers(block, flight, preferences=None):
         info = entries.get(role)
         if not isinstance(info, dict) or not info.get("name"):
             continue
-        parts = [
-            f"{label} {airport(flight, role, preferences)}: {info['name']}"
-        ]
+        parts = [f"{label} {airport(flight, role, preferences)}: {info['name']}"]
         if info.get("phone"):
             parts.append(info["phone"])
         if info.get("email"):
