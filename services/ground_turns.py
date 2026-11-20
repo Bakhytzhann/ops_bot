@@ -417,11 +417,13 @@ class GroundTurnStore:
             "Высадка пассажиров": _summary(_durations(tours, "PAX_OFF_STARTED", "PAX_OFF_COMPLETED")),
             "Время на земле": _summary(_durations(tours, "IN_BLOCK", "OUT_BLOCK")),
         }
+        frequency = Counter(kind for events in tours.values() for kind in events)
         return {
             "station": station,
             "days": days,
             "turns": len(tours),
             "events": total,
+            "event_counts": dict(frequency.most_common()),
             "metrics": metrics,
             "notes": recent_notes[-45:],
             "critical": critical_notes[-30:],
