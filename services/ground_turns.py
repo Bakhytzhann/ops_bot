@@ -399,7 +399,11 @@ class GroundTurnStore:
                 item = {"date": row["event_at"][:10], "text": note[:500]}
                 if row["event_at"] >= since:
                     recent_notes.append(item)
-                if any(word in note.casefold() for word in critical_terms):
+                    tours.setdefault(row["turn_key"], {})
+                    total += 1
+                if detail.get("critical") is True or any(
+                    word in note.casefold() for word in critical_terms
+                ):
                     critical_notes.append(item)
                 continue
             if row["event_at"] < since:
