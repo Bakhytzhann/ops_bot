@@ -43,6 +43,9 @@ from bot.flight_browser import (
 )
 from bot.ground_turns import (
     clear_ground_turn_input,
+    deactivate_ground,
+    ground_text_accepted,
+    handle_ground_text,
     ground_turn_callback,
     handle_ground_turn_input,
     has_ground_turn_input,
@@ -103,6 +106,7 @@ def accepts_message(update, context):
             or message.text.strip() in HOME_ACTIONS
             or pending_reply(update, context)
             or has_ground_turn_input(context)
+            or ground_text_accepted(context, message.text)
         )
     )
 
@@ -279,6 +283,8 @@ async def _handle_message(update, context):
     text = message.text.strip()
     if text in HOME_ACTIONS or command:
         clear_ground_turn_input(context)
+        if text != "GROUND STATUS":
+            deactivate_ground(context)
     if text == "OPS BRIEF":
         await show_ops_brief(update, context)
         return
@@ -320,6 +326,9 @@ async def _handle_message(update, context):
         return
     if not command and has_ground_turn_input(context):
         await handle_ground_turn_input(update, context)
+        return
+    if not command and ground_text_accepted(context, text):
+        await handle_ground_text(update, context)
         return
     if command:
         action, arguments = command
