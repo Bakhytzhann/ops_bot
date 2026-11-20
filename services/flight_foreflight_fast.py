@@ -1,4 +1,5 @@
 """Fast ForeFlight API fields for Flight Card; never fetches briefing documents."""
+
 import asyncio
 
 from services.foreflight_operations import (
@@ -41,20 +42,27 @@ async def load_fast_foreflight(flight):
         )
         times = perf.get("times") or {}
         minutes = times.get("timeToDestinationMinutes")
-        warning = bool(detail.get("errors") or perf.get("errors") or perf.get("warnings"))
+        warning = bool(
+            detail.get("errors") or perf.get("errors") or perf.get("warnings")
+        )
         result["flighttime"] = SourceBlock(
             "ForeFlight API",
             "ETE " + duration(minutes),
             "partial" if warning else "ready",
-            details={"eet_minutes": minutes, "basis": basis,
-                     "has_ete": isinstance(minutes, (int, float))},
+            details={
+                "eet_minutes": minutes,
+                "basis": basis,
+                "has_ete": isinstance(minutes, (int, float)),
+            },
         )
         route = data.get("routeToDestination") or {}
         result["route"] = SourceBlock(
             "ForeFlight API",
             "RTE / ALTN\n"
-            + "ROUTE: " + (route.get("route") or row.get("route") or "нет данных")
-            + "\nALTN: " + (data.get("alternate") or "нет данных"),
+            + "ROUTE: "
+            + (route.get("route") or row.get("route") or "нет данных")
+            + "\nALTN: "
+            + (data.get("alternate") or "нет данных"),
             "partial" if warning else "ready",
             details={
                 "route": route.get("route") or row.get("route"),
@@ -64,10 +72,13 @@ async def load_fast_foreflight(flight):
             },
         )
     else:
-        result["flighttime"] = SourceBlock("ForeFlight API", "ETE: источник недоступен.")
+        result["flighttime"] = SourceBlock(
+            "ForeFlight API", "ETE: источник недоступен."
+        )
     if isinstance(overflight, dict):
         result["overflight"] = SourceBlock(
-            "ForeFlight API", "Overflights",
+            "ForeFlight API",
+            "Overflights",
             "ready",
             details={"overflownCountries": overflight.get("overflownCountries")},
         )
