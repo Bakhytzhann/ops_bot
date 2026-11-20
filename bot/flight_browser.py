@@ -96,6 +96,7 @@ def schedule_heading(start, end):
 
 
 def render_page(token, listing, page=0):
+    """A numbered, copyable seven-day SKED, not one inline button per flight."""
     flights = listing["flights"]
     preferences = listing.get("preferences", {})
     pages = max(1, (len(flights) + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -103,66 +104,104 @@ def render_page(token, listing, page=0):
         raise ValueError("Страница списка не найдена. Откройте SKED.")
     listing["page"] = page
     start = page * PAGE_SIZE
-    rows = []
-    for i, f in enumerate(flights[start : start + PAGE_SIZE], start):
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    flight_label(f, preferences), callback_data=f"fl:{token}:{i}"
-                )
-            ]
-        )
-    navigation = []
-    if page:
-        navigation.append(
-            InlineKeyboardButton("←", callback_data=f"wk:{token}:{page - 1}")
-        )
-    if page + 1 < pages:
-        navigation.append(
-            InlineKeyboardButton("→", callback_data=f"wk:{token}:{page + 1}")
-        )
-    if navigation:
-        rows.append(navigation)
-    rows.append(
-        [
-            InlineKeyboardButton(
-                "UTC · ICAO" if preferences.get("time") == "LT" else "LT · IATA",
-                callback_data=f"sv:{token}:view",
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton("7 дней", callback_data=f"sk:{token}:7"),
-            InlineKeyboardButton("30 дней", callback_data=f"sk:{token}:30"),
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh"),
-        ]
-    )
-    state = (
-        "Выберите рейс"
-        if flights
-        else "нет рейсов"
-        if listing["complete"]
-        else "нет данных"
-    )
-    text = (
-        f"{'Поиск: ' if listing.get('search') else ''}{schedule_heading(listing['start'], listing['end'])}\n"
-        f"{state} · Страница {page + 1}/{pages}"
-    )
+    lines = [
+        "SKED · " + schedule_heading(listing["start"], listing["end"]),
+        "Режим: " + (
+            "LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"
+        ),
+        "",
+    ]
+    previous_day = None
+    for index, flight in enumerate(flights[start:start + PAGE_SIZE], start):
+        day = flight_date(flight, preferences)
+        if day != previous_day:
+            if previous_day is not None:
+                lines.append("")
+            lines.append(day)
+            previous_day = day
+        lines.append(f"{index + 1}. {flight_label(flight, preferences)}")
+    if not flights:
+        lines.append("Нет рейсов." if listing["complete"] else "Нет данных.")
     if not listing["complete"]:
-        text += "\nРасписание неполное: нет данных по части рейсов."
-    text += "\nРежим: " + (
-        "LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"
+        lines.append("Расписание неполное: нет данных по части рейсов.")
+    lines.extend(("", f"Введите номер рейса · Страница {page + 1}/{pages}"))
+    rows = []
+    if pages > 1:
+        navigation = []
+        if page:
+            navigation.append(InlineKeyboardButton("← Страница", callback_data=f"wk:{token}:{page - 1}"))
+        if page + 1 < pages:
+            navigation.append(InlineKeyboardButton("Страница →", callback_data=f"wk:{token}:{page + 1}"))
+        rows.append(navigation)
+    rows.append([
+        InlineKeyboardButton("← 7 дней", callback_data=f"sk:{token}:prev"),
+        InlineKeyboardButton("7 дней →", callback_data=f"sk:{token}:next"),
+    ])
+    rows.append(preference_buttons(token, preferences))
+    rows.append([InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def selected_schedule(context, update):
+    """Only a listing in this exact chat/topic may receive numeric selection."""
+    scope = _scope(update)
+    token = (context.user_data.get("active_sked") or {}).get(scope)
+    listing = _cache(context).get(token)
+    if not listing or listing["scope"] != scope:
+        return None, None
+    return token, listing
+
+
+def accepts_sked_number(update, context):
+    text = str(getattr(update.effective_message, "text", "") or "").strip()
+    if not re.fullmatch(r"[1-9]\d{0,3}", text):
+        return False
+    _, listing = selected_schedule(context, update)
+    return bool(listing and int(text) <= len(listing["flights"]))
+
+
+async def select_sked_number(update, context):
+    """Reuse exact callback card path for a typed schedule row."""
+    from types import SimpleNamespace
+
+    require_user(update)
+    token, listing = selected_schedule(context, update)
+    text = str(update.effective_message.text or "").strip()
+    if not listing or not re.fullmatch(r"[1-9]\d{0,3}", text):
+        raise ValueError("Откройте SKED и введите номер рейса из списка.")
+    position = int(text) - 1
+    if position >= len(listing["flights"]):
+        raise ValueError("Рейс не найден в текущем списке.")
+    callback = SimpleNamespace(
+        data=f"fl:{token}:{position}",
+        answer=lambda **kwargs: None,
+        edit_message_text=update.effective_message.reply_text,
     )
-    return text, InlineKeyboardMarkup(rows)
+    # Numeric messages use the normal screen transport, while the existing
+    # callback-based card selection remains the single source of card logic.
+    proxy = SimpleNamespace(
+        callback_query=callback,
+        effective_user=update.effective_user,
+        effective_chat=update.effective_chat,
+        effective_message=update.effective_message,
+        main_screen=getattr(update, "main_screen", None),
+    )
+    await handle_selection(proxy, context)
+    # Never remove a numeric input until the selected card has been displayed.
+    bot = getattr(context, "bot", None)
+    if bot is not None and getattr(update.effective_message, "message_id", None):
+        from contextlib import suppress
+        from telegram.error import TelegramError
+
+        with suppress(TelegramError, AttributeError):
+            await bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=update.effective_message.message_id,
+            )
 
 
 async def show_week(
-    update, context, *, today=None, search=None, days=3, preferences=None, edit=False
+    update, context, *, today=None, search=None, days=7, preferences=None, edit=False
 ):
     require_user(update)
     today = today or datetime.now(UTC).date()
@@ -235,6 +274,7 @@ async def show_week(
         "search": term,
         "preferences": dict(preferences or {}),
     }
+    context.user_data.setdefault("active_sked", {})[_scope(update)] = token
     cache[token] = listing
     text, markup = render_page(token, listing)
     if edit:
@@ -297,13 +337,15 @@ async def handle_selection(update, context):
             text, markup = render_page(token, listing, listing.get("page", 0))
             await edit_message_text(query, text, reply_markup=markup)
         else:
-            if position not in {"7", "30", "refresh"}:
+            if position not in {"prev", "next", "refresh"}:
                 raise ValueError("Неизвестный период SKED.")
             start = datetime.fromisoformat(listing["start"]).date()
             end = datetime.fromisoformat(listing["end"]).date()
-            days = (end - start).days + 1 if position == "refresh" else int(position)
-            if position != "refresh":
-                start = end + timedelta(days=1)
+            days = (end - start).days + 1
+            if position == "next":
+                start = start + timedelta(days=7)
+            elif position == "prev":
+                start = start - timedelta(days=7)
             search = listing.get("search")
             await show_week(
                 update,
