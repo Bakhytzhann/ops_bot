@@ -434,6 +434,7 @@ async def handle_selection(update, context):
                 listing["flights"][position],
                 refresh=action == "refresh",
                 on_update=progress,
+                from_sked=True,
             )
             if position in snapshots:
                 listing.setdefault("previous", {})[position] = snapshots[position]
