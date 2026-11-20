@@ -121,7 +121,7 @@ def render_page(token, listing, page=0):
             previous_day = day
         lines.append(f"{index + 1}. {flight_label(flight, preferences)}")
     if not flights:
-        lines.append("Нет рейсов." if listing["complete"] else "Нет данных.")
+        lines.append("нет рейсов" if listing["complete"] else "нет данных")
     if not listing["complete"]:
         lines.append("Расписание неполное: нет данных по части рейсов.")
     lines.extend(("", f"Введите номер рейса · Страница {page + 1}/{pages}"))
