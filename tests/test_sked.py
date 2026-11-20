@@ -58,10 +58,11 @@ def session():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "direction,start,end",
-    [("next", "2027-01-05", "2027-01-11"),
-     ("prev", "2026-12-22", "2026-12-28")],
+    [("next", "2027-01-05", "2027-01-11"), ("prev", "2026-12-22", "2026-12-28")],
 )
-async def test_next_window_crosses_year(identity, session, monkeypatch, direction, start, end):
+async def test_next_window_crosses_year(
+    identity, session, monkeypatch, direction, start, end
+):
     query = AsyncMock(return_value={"flights": [], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     old = session.bot_data["weekly_flight_lists"]["token"]
