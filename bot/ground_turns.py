@@ -18,9 +18,8 @@ from bot.message_edits import edit_message_text
 from services.ground_flights import load_ground_flights
 from services.ground_timing import choose_remark, station_remarks, turn_timing
 from services.ground_turns import ground_turns
-from services.ground_input import parse_ground_input
+from services.ground_input import GroundModelUnavailable, parse_ground_input
 from services.ground_report import interpret_station
-from services.ai_analysis import AnalysisUnavailable
 from services.snapshot_models import utc, zulu
 
 CATEGORIES = {"active": "Актуальные", "recent": "Недавние", "clarify": "Уточнить"}
@@ -354,7 +353,7 @@ async def _show_station_stats(update, state, index):
     lines.extend(("", "ПРОБЛЕМЫ И РИСКИ"))
     try:
         result = await interpret_station(report)
-    except AnalysisUnavailable:
+    except Exception:  # optional insights must not block numeric statistics
         lines.append("Анализ заметок сейчас недоступен. Тайминги показаны выше.")
     else:
         if result is None or not (result.frequent or result.critical):
@@ -618,7 +617,7 @@ async def handle_ground_text(update, context):
             )
         state["enabled"] = True
         await _show_card(update, state, index)
-    except AnalysisUnavailable:
+    except GroundModelUnavailable:
         await message.reply_text("Qwen сейчас недоступен. Вводная не записана, попробуйте ещё раз.")
         return
     except (ValueError, OSError, sqlite3.Error, HTTPError, TimeoutError) as exc:
