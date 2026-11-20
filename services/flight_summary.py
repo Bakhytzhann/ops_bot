@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from services.flight_display import flight_date, flight_stamp, flight_time
+from services.flight_handlers import format_handlers
 from services.flight_weather import (
     grouped_reports,
     station_label,
@@ -168,6 +169,7 @@ def render_card(snapshot, preferences=None):
         )
     )
 
+    lines.append(format_handlers(snapshot.blocks.get("handlers"), flight, preferences))
     lines.append(concise_weather(snapshot, preferences))
     lines.append(route_summary(snapshot, preferences))
     lines.append("NOTAM · Подготовка (по запросу)")
