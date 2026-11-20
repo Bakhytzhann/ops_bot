@@ -285,6 +285,8 @@ async def _handle_message(update, context):
     command = parsed_command(message.text)
     text = message.text.strip()
     if text in HOME_ACTIONS or command:
+        if text != "SKED" and not (command and command[0] in {"week", "sked"}):
+            context.user_data.pop("active_sked", None)
         clear_ground_turn_input(context)
         if text != "GROUND STATUS":
             deactivate_ground(context)
