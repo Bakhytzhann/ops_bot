@@ -1,7 +1,8 @@
 OPS Bot Telegram Mini App
 =========================
 
-Open **SKED** from the bot menu, select a flight, and open **Preparation**.
+Open **OPS** from the bot menu to see the six operations tools. In **SKED**,
+select a flight to open its card and **Preparation**.
 Leon provides the schedule, crew, duty, and handling. ForeFlight provides the
 flight plan and briefing. Weather uses Leon and AWC.
 
@@ -33,7 +34,7 @@ before starting FastAPI for the first time.
    npm.cmd --prefix .\frontend run build
 
 For frontend development, ``npm.cmd --prefix .\frontend run dev`` starts Vite
-with a local proxy to FastAPI. The page prompts users to open **SKED** in
+with a local proxy to FastAPI. The page prompts users to open **OPS** in
 Telegram when opened directly in a browser.
 
 Telegram test with Cloudflare Quick Tunnel
@@ -48,11 +49,11 @@ Telegram test with Cloudflare Quick Tunnel
 
 2. Copy the temporary ``https://…trycloudflare.com`` URL. In **@BotFather**,
    use ``/setmenubutton`` for the bot that matches the backend configuration.
-   Set the URL and name the button **SKED**. For a persistent HTTPS address,
+   Set the URL and name the button **OPS**. For a persistent HTTPS address,
    you can set ``TELEGRAM_MINI_APP_URL`` locally and start the bot with
    ``main.py`` to register the menu.
-3. From an approved Telegram account, open **SKED** in the private bot chat.
-   Pick a UTC date and a flight present in both Leon and ForeFlight. Open
+3. From an approved Telegram account, open **OPS** in the private bot chat.
+   Open **SKED** and pick a flight present in both Leon and ForeFlight. Open
    **Preparation** and check **CREW / FDP**, **WX / TAF**, and **NOTAM**.
 4. Stop the `Quick Tunnel`_ with **Ctrl+C** when the test is complete.
 

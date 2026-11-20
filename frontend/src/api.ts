@@ -1,3 +1,8 @@
+import type {
+  AircraftList, Checklist, Documents, FleetBrief, GroundDetail, GroundEntry, GroundHistory, GroundList,
+  Journey, JourneyDays, JourneyFilters, Operator, Planned, PlannedPeriod, Priorities, RequestDetail, Requests, StationReport,
+} from './ops-types'
+
 export type Status = 'READY' | 'PARTIAL' | 'UNAVAILABLE' | 'STALE'
 export type Display = 'UTC' | 'LT'
 
@@ -103,6 +108,14 @@ export type Load<T> = (signal: AbortSignal, refresh?: boolean) => Promise<T>
 
 export function createOpsApi(headers: HeadersInit) {
   const cache = new Map<string, { value: SourceState; until: number }>()
+  const root = import.meta.env.BASE_URL + 'api/v1/'
+
+  async function readResponse<T>(response: Response): Promise<T> {
+    if (response.ok) return response.json()
+    const body = await response.json().catch(() => null)
+    if (response.status === 401 || response.status === 403) cache.clear()
+    throw new ApiError(typeof body?.detail === 'string' ? body.detail : 'OPS request could not be completed.', response.status)
+  }
 
   async function get<T extends SourceState>(
     path: string, params: URLSearchParams, signal: AbortSignal, ttl: number, refresh: boolean,
@@ -112,13 +125,8 @@ export function createOpsApi(headers: HeadersInit) {
     if (!refresh && cached && cached.until > Date.now()) return cached.value as T
 
     if (refresh) params.set('refresh', 'true')
-    const response = await fetch(import.meta.env.BASE_URL + 'api/v1/' + path + '?' + params, { headers, signal, cache: 'no-store' })
-    if (!response.ok) {
-      const body = await response.json().catch(() => null)
-      if (response.status === 401 || response.status === 403) cache.clear()
-      throw new ApiError(typeof body?.detail === 'string' ? body.detail : 'OPS service unavailable.', response.status)
-    }
-    const value: T = await response.json()
+    const response = await fetch(root + path + '?' + params, { headers, signal, cache: 'no-store' })
+    const value = await readResponse<T>(response)
     if (!signal.aborted) {
       const temporary = value.status === 'UNAVAILABLE' || value.status === 'STALE'
       const freshness = !temporary && value.fresh_until && path !== 'schedule' ? Date.parse(value.fresh_until) : Infinity
@@ -143,6 +151,32 @@ export function createOpsApi(headers: HeadersInit) {
     return get<T>('flights/' + flight.id + '/' + endpoint, params, signal, ttl, refresh)
   }
 
+  function tool<T extends SourceState>(path: string, ttl: number): Load<T> {
+    return (signal, refresh = false) => get<T>(path, new URLSearchParams(), signal, ttl, refresh)
+  }
+
+  function journeyParams(days: JourneyDays, filters: JourneyFilters) {
+    return new URLSearchParams({
+      days: String(days),
+      ...Object.fromEntries(Object.entries(filters).filter(([, value]) => value)),
+    })
+  }
+
+  async function recordGround(key: string, entry: GroundEntry, signal: AbortSignal) {
+    const path = 'ground/turns/' + encodeURIComponent(key)
+    const requestHeaders = new Headers(headers)
+    requestHeaders.set('Content-Type', 'application/json')
+    const response = await fetch(root + path + '/events', {
+      method: 'POST', headers: requestHeaders, body: JSON.stringify(entry), signal, cache: 'no-store',
+    })
+    const detail = await readResponse<GroundDetail>(response)
+    for (const key of cache.keys()) {
+      if (key.startsWith('ground?') || key.startsWith('ground/stations/') || key.startsWith(path + '?')) cache.delete(key)
+    }
+    cache.set(path + '?', { value: detail, until: Date.now() + 15_000 })
+    return detail
+  }
+
   return {
     schedule: (day: string, end: string, signal: AbortSignal, refresh = false) =>
       get<Schedule>('schedule', new URLSearchParams({ day, end_day: end }), signal, 240_000, refresh),
@@ -160,6 +194,30 @@ export function createOpsApi(headers: HeadersInit) {
       section<WeatherPreparation>(target, 'preparation/weather', signal, refresh, 110_000),
     notams: (target: Selection, signal: AbortSignal, refresh = false) =>
       section<NotamPreparation>(target, 'preparation/notams', signal, refresh, 110_000),
+    ground: tool<GroundList>('ground', 20_000),
+    turn: (key: string) => tool<GroundDetail>('ground/turns/' + encodeURIComponent(key), 15_000),
+    groundHistory: (key: string) => tool<GroundHistory>('ground/turns/' + encodeURIComponent(key) + '/history', 30_000),
+    station: (code: string) => tool<StationReport>('ground/stations/' + encodeURIComponent(code), 35_000),
+    recordGround,
+    brief: tool<FleetBrief>('ops-brief', 70_000),
+    aircraft: tool<AircraftList>('fleet/aircraft', 240_000),
+    documents: (id: number) => tool<Documents>('fleet/aircraft/' + id + '/documents', 35_000),
+    operator: tool<Operator>('fleet/operator', 240_000),
+    checklist: (target: Selection, signal: AbortSignal, refresh = false) =>
+      section<Checklist>(target, 'checklist', signal, refresh, 50_000),
+    planned: (period: PlannedPeriod, signal: AbortSignal, refresh = false) =>
+      get<Planned>('analytics', new URLSearchParams({ period }), signal, 150_000, refresh),
+    journey: (days: JourneyDays, filters: JourneyFilters, signal: AbortSignal, refresh = false) =>
+      get<Journey>('analytics/journey', journeyParams(days, filters), signal, 150_000, refresh),
+    journeyPriorities: (days: JourneyDays, filters: JourneyFilters, charter: boolean, signal: AbortSignal, refresh = false) => {
+      const params = journeyParams(days, filters)
+      if (charter) params.set('charter', 'true')
+      return get<Priorities>('analytics/journey/priorities', params, signal, 75_000, refresh)
+    },
+    charter: tool<FleetBrief>('charter/fleet', 70_000),
+    requests: tool<Requests>('charter/sales', 75_000),
+    request: (id: number) => tool<RequestDetail>('charter/sales/' + id, 75_000),
+    requestPriorities: (id: number) => tool<Priorities>('charter/sales/' + id + '/priorities', 75_000),
   }
 }
 

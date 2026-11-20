@@ -1,8 +1,14 @@
 # OPS Bot Mini App
 
-The first release covers SKED, Flight Card, and Preparation. Leon supplies the UTC
-schedule, crew, duty, and handling. ForeFlight supplies the plan and briefing. WX
-shows the latest reports available from Leon and AWC.
+The OPS Dashboard opens Ground Status, SKED, OPS Brief, Fleet Docs, Analytics,
+and Charter Check. SKED leads to Flight Card and Preparation. The selected
+leg also opens its ground turns and Leon OPS checklist. The polling bot and Mini
+App share the ground journal. Charter Sales access uses the bot's existing
+admin and Sales permissions.
+
+Aircraft documents and operator certificates come from Leon. Operator manuals
+require an approved library. Schedule analytics and reported Journey Log figures
+show their respective date ranges and coverage.
 
 ## Run
 
@@ -20,14 +26,14 @@ shows the latest reports available from Leon and AWC.
 4. Serve that process at the root of an HTTPS origin. The origin must reach the
    Mini App, its assets, and `/api/v1/` on the same host.
 5. Set `TELEGRAM_MINI_APP_URL` to that HTTPS URL and start the bot through
-   `main.py`. Open **SKED** from the menu in the private bot chat. The menu can
+   `main.py`. Open **OPS** from the menu in the private bot chat. The menu can
    also be set in BotFather when the polling bot is already running.
 
-Telegram launches expire after one hour. Reopen SKED to start a fresh session.
+Telegram launches expire after one hour. Reopen OPS to start a fresh session.
 The API checks the OPS Bot access list on each request. An ordinary browser
 opening the URL displays the Telegram launch instructions.
 
 The API contract is served at `/api/openapi.json`. The Telegram auth adapter
 guards the HTTP routes. The operational read models live in
-`application/flight_views.py` and call the shared Leon, ForeFlight, and weather
-services.
+`application/flight_views.py` and `application/ops_views.py`. They call the
+shared Leon, ForeFlight, weather and SQLite services.

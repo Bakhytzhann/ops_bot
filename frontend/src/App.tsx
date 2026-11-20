@@ -1,7 +1,12 @@
-import { CalendarDays, ChevronLeft, PlaneTakeoff, RefreshCw } from 'lucide-react'
+import { CalendarDays, ChartNoAxesCombined, ChevronLeft, ClipboardList, FolderOpen, PlaneTakeoff, Radar, RefreshCw, Search } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Display, Flight, Handling, OpsApi, Plan, Selection } from './api'
 import { Badge, Button } from './components/ui'
+import { FleetDocs, OpsBrief } from './FleetTools'
+import { GroundStation, GroundStatus, GroundTurn } from './GroundStatus'
+import { ToolRow } from './OpsCommon'
+import type { LegRef, Turn } from './ops-types'
+import { Analytics, CharterCheck, CharterRequest, CharterSales } from './ReportingTools'
 import { CrewPanel, HotelPanel, Preparation, WeatherPanel } from './Preparation'
 import { flightAirport, flightTime, PanelHeader, Resource, StatusBadge, utcDate, utcTime } from './presentation'
 
@@ -49,51 +54,177 @@ function Header({ title, back, mode, toggleMode }: {
 export function OpenInTelegram() {
   return (
     <main className="app-frame">
-      <Header title="SKED" />
+      <Header title="OPS" />
       <section className="mx-4 mt-4 rounded-xl border border-border bg-card p-4">
         <h2 className="font-bold">Open in Telegram</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Select SKED in the OPS Bot menu.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Select OPS in the bot menu.</p>
       </section>
     </main>
   )
 }
 
-type Screen = { view: 'sked' } | { view: 'card' | 'prep'; selection: Selection }
+const actions = [
+  { view: 'ground', label: 'GROUND STATUS', detail: 'Turns & events', icon: Radar },
+  { view: 'sked', label: 'SKED', detail: '7-day schedule', icon: CalendarDays },
+  { view: 'brief', label: 'OPS BRIEF', detail: 'Fleet & stations', icon: ClipboardList },
+  { view: 'docs', label: 'FLEET DOCS', detail: 'Docs & checklist', icon: FolderOpen },
+  { view: 'analytics', label: 'ANALYTICS', detail: 'Schedule & logs', icon: ChartNoAxesCombined },
+  { view: 'charter', label: 'CHARTER CHECK', detail: 'Fleet & history', icon: Search },
+] as const
+
+type Action = typeof actions[number]['view']
+type Screen =
+  | { view: 'dashboard' }
+  | { view: Exclude<Action, 'docs'> }
+  | { view: 'docs'; checklist?: boolean }
+  | { view: 'card' | 'prep'; selection: Selection }
+  | { view: 'linked'; leg: LegRef }
+  | { view: 'ground-turn'; turn: Turn }
+  | { view: 'ground-station'; station: string }
+  | { view: 'charter-sales' }
+  | { view: 'charter-request'; id: number }
+
+const screenTitles: Partial<Record<Screen['view'], string>> = {
+  dashboard: 'OPS Dashboard', card: 'Flight Card', prep: 'Preparation', linked: 'Flight Card',
+  'ground-turn': 'Ground Turn', 'ground-station': 'Station Statistics',
+  'charter-sales': 'Charter Sales', 'charter-request': 'Quote Request',
+}
+
+function Dashboard({ selection, mode, onOpen, onCard }: {
+  selection?: Selection; mode: Display; onOpen: (view: Action) => void; onCard: (selection: Selection) => void
+}) {
+  return (
+    <>
+      <nav className="quick-actions" aria-label="OPS quick actions">
+        {actions.map(({ view, label, detail, icon: Icon }) => (
+          <Button key={view} variant="outline" onClick={() => onOpen(view)}
+            className="min-h-22 min-w-0 flex-col items-start justify-between gap-1.5 px-2.5 py-2.5 text-left sm:px-3">
+            <Icon size={20} className="text-primary" aria-hidden="true" />
+            <span className="w-full">
+              <span className="block font-mono text-[.7rem] font-bold sm:text-xs">{label}</span>
+              <span className="mt-0.5 block text-[.69rem] leading-tight text-muted-foreground">{detail}</span>
+            </span>
+          </Button>
+        ))}
+      </nav>
+      {selection && <div className="ops-panel">
+        <ToolRow title={selection.flight.number ?? 'Selected flight'}
+          detail={[selection.flight.aircraft, flightAirport(selection.flight, 'departure', mode) + ' → ' +
+            flightAirport(selection.flight, 'arrival', mode), flightTime(selection.flight, 'std', mode)].filter(Boolean).join(' · ')}
+          action="FLIGHT CARD" onClick={() => onCard(selection)} />
+      </div>}
+    </>
+  )
+}
+
+function ResolvedCard({ selection, onSelect }: { selection: Selection; onSelect: (selection: Selection) => void }) {
+  useEffect(() => onSelect(selection), [onSelect, selection])
+  return null
+}
+
+function LinkedFlight({ api, leg, week, onSelect, onSked }: {
+  api: OpsApi; leg: LegRef; week: string; onSelect: (selection: Selection) => void; onSked: () => void
+}) {
+  const day = leg.std?.slice(0, 10) ?? ''
+  const first = day >= week && day <= dayOffset(week, 6) ? week : day
+  const load = useCallback((signal: AbortSignal, refresh?: boolean) => api.schedule(first, dayOffset(first, 6), signal, refresh), [api, first])
+  return <Resource load={load} label="confirmed SKED leg">
+    {(data) => {
+      const flight = data.flights.find((item) => item.id === leg.id && Date.parse(item.std) === Date.parse(leg.std ?? '') &&
+        item.departure === leg.departure && item.arrival === leg.arrival)
+      return flight
+        ? <ResolvedCard selection={{ flight, week: first }} onSelect={onSelect} />
+        : <section className="ops-panel p-3"><p className="mb-3 text-sm">Confirm the current leg in SKED.</p>
+          <Button onClick={onSked}>Open SKED</Button></section>
+    }}
+  </Resource>
+}
 
 export function App({ api, host }: { api: OpsApi; host: AppHost }) {
   const [mode, setMode] = useState<Display>('UTC')
   const [week, setWeek] = useState(() => utcDate(new Date().toISOString()))
   const [day, setDay] = useState<string>()
-  const [screen, setScreen] = useState<Screen>({ view: 'sked' })
-  const back = useCallback(() => {
-    setScreen((current) => current.view === 'prep'
-      ? { view: 'card', selection: current.selection }
-      : { view: 'sked' })
+  const [selection, setSelection] = useState<Selection>()
+  const [stack, setStack] = useState<Screen[]>([{ view: 'dashboard' }])
+  const screen = stack[stack.length - 1]
+  const back = useCallback(() => setStack((current) => current.length > 1 ? current.slice(0, -1) : current), [])
+  const open = useCallback((next: Screen) => setStack((current) => [...current, next]), [])
+  const openSked = useCallback(() => open({ view: 'sked' }), [open])
+  const openCard = useCallback((picked: Selection) => {
+    setSelection(picked)
+    open({ view: 'card', selection: picked })
+  }, [open])
+  const openLinked = useCallback((leg: LegRef) => {
+    if (leg.std && leg.id) open({ view: 'linked', leg })
+    else openSked()
+  }, [open, openSked])
+  const fromLinked = useCallback((picked: Selection) => {
+    setSelection(picked)
+    setStack((current) => current.at(-1)?.view === 'linked' ? [...current.slice(0, -1), { view: 'card', selection: picked }] : current)
   }, [])
   const view = screen.view
   useEffect(() => {
     window.scrollTo(0, 0)
-    if (view !== 'sked') return host.bindBack?.(back)
-  }, [view, host, back])
+    if (view !== 'dashboard') return host.bindBack?.(back)
+  }, [screen, view, host, back])
 
+  let content
+  switch (screen.view) {
+    case 'dashboard':
+      content = <Dashboard selection={selection} mode={mode} onOpen={(action) => open({ view: action })} onCard={openCard} />
+      break
+    case 'sked':
+      content = <Schedule api={api} mode={mode} week={week} day={day} onWeek={setWeek} onDay={setDay}
+        onFlight={(flight) => openCard({ week, flight })} />
+      break
+    case 'card':
+      content = <Card api={api} mode={mode} selection={screen.selection}
+        onPrepare={() => open({ view: 'prep', selection: screen.selection })}
+        onGround={() => { setSelection(screen.selection); open({ view: 'ground' }) }}
+        onChecklist={() => { setSelection(screen.selection); open({ view: 'docs', checklist: true }) }} />
+      break
+    case 'prep':
+      content = <Preparation api={api} mode={mode} selection={screen.selection} openLink={host.openLink} />
+      break
+    case 'linked':
+      content = <LinkedFlight api={api} leg={screen.leg} week={week} onSelect={fromLinked} onSked={openSked} />
+      break
+    case 'ground':
+      content = <GroundStatus api={api} selection={selection} onTurn={(turn) => open({ view: 'ground-turn', turn })} />
+      break
+    case 'ground-turn':
+      content = <GroundTurn api={api} turn={screen.turn} onStation={(station) => open({ view: 'ground-station', station })} onFlight={openSked} />
+      break
+    case 'ground-station':
+      content = <GroundStation api={api} station={screen.station} />
+      break
+    case 'brief':
+      content = <OpsBrief api={api} selection={selection} onFlight={openLinked} />
+      break
+    case 'docs':
+      content = <FleetDocs api={api} selection={selection} onSked={openSked} openLink={host.openLink} initial={screen.checklist ? 'checklist' : 'aircraft'} />
+      break
+    case 'analytics':
+      content = <Analytics api={api} selection={selection} />
+      break
+    case 'charter':
+      content = <CharterCheck api={api} selection={selection} onFlight={openLinked} onSales={() => open({ view: 'charter-sales' })} />
+      break
+    case 'charter-sales':
+      content = <CharterSales api={api} onRequest={(id) => open({ view: 'charter-request', id })} />
+      break
+    case 'charter-request':
+      content = <CharterRequest api={api} id={screen.id} />
+      break
+  }
+
+  const chooseMode = view === 'sked' || view === 'card' || view === 'prep'
   return (
     <main className="app-frame">
-      <Header
-        title={view === 'sked' ? 'SKED' : view === 'card' ? 'Flight Card' : 'Preparation'}
-        back={view !== 'sked' && !host.bindBack ? back : undefined}
-        mode={mode} toggleMode={() => setMode((value) => value === 'UTC' ? 'LT' : 'UTC')}
-      />
-      <div className="screen-content">
-        {screen.view === 'sked' ? (
-          <Schedule api={api} mode={mode} week={week} day={day} onWeek={setWeek} onDay={setDay}
-            onFlight={(flight) => setScreen({ view: 'card', selection: { week, flight } })} />
-        ) : screen.view === 'card' ? (
-          <Card api={api} mode={mode} selection={screen.selection}
-            onPrepare={() => setScreen({ view: 'prep', selection: screen.selection })} />
-        ) : (
-          <Preparation api={api} mode={mode} selection={screen.selection} openLink={host.openLink} />
-        )}
-      </div>
+      <Header title={screenTitles[view] ?? actions.find((action) => action.view === view)?.label ?? 'OPS'}
+        back={view !== 'dashboard' && !host.bindBack ? back : undefined}
+        mode={mode} toggleMode={chooseMode ? () => setMode((value) => value === 'UTC' ? 'LT' : 'UTC') : undefined} />
+      <div className="screen-content">{content}</div>
     </main>
   )
 }
@@ -262,8 +393,8 @@ function HandlingPanel({ data }: { data: Handling }) {
 }
 
 function Card({
-  api, selection, mode, onPrepare,
-}: { api: OpsApi; selection: Selection; mode: Display; onPrepare: () => void }) {
+  api, selection, mode, onPrepare, onGround, onChecklist,
+}: { api: OpsApi; selection: Selection; mode: Display; onPrepare: () => void; onGround: () => void; onChecklist: () => void }) {
   const [refreshKey, setRefreshKey] = useState(0)
   const lastRefresh = useRef(0)
   const plan = useCallback((signal: AbortSignal, refresh?: boolean) => api.plan(selection, signal, refresh), [api, selection])
@@ -277,6 +408,10 @@ function Card({
       <FlightLeg flight={selection.flight} mode={mode} />
       <div className="flex items-center gap-2">
         <Button className="flex-1" onClick={onPrepare}>Preparation</Button>
+      </div>
+      <div className="tool-tabs">
+        <Button variant="outline" onClick={onGround}>Ground Status</Button>
+        <Button variant="outline" onClick={onChecklist}>Flight checklist</Button>
         <Button variant="outline" size="icon" aria-label="Refresh Flight Card" onClick={() => {
           const now = Date.now()
           if (now - lastRefresh.current < 5000) return

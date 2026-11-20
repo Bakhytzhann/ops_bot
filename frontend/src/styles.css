@@ -94,6 +94,33 @@
 
   .read-state { @apply flex min-h-13 flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-sm text-muted-foreground; }
   .loading-dot { @apply size-2 rounded-full bg-primary motion-safe:animate-pulse; }
+
+  .quick-actions { @apply grid grid-cols-2 gap-2.5; }
+  .tool-row {
+    @apply flex min-h-14 w-full min-w-0 items-center justify-between gap-2 border-t border-border
+      px-3 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary;
+  }
+  .tool-row > span:last-child { @apply font-mono text-[.65rem]; }
+  .tool-tabs { @apply flex flex-wrap items-center gap-1.5; }
+  .tool-tabs button { @apply px-2.5 text-xs; }
+  .facts { @apply grid grid-cols-2 gap-x-2 px-3 py-2 sm:grid-cols-3; }
+  .facts > div { @apply min-w-0 border-b border-border py-2; }
+  .facts dt { @apply font-mono text-[.7rem] text-muted-foreground; }
+  .facts dd { @apply wrap-anywhere text-sm font-semibold; }
+  .tool-section { @apply border-b border-border px-3 py-2.5; }
+  .tool-section:last-child { @apply border-b-0; }
+  .tool-section .tool-row { @apply mt-2 px-0; }
+  .tool-line { @apply wrap-anywhere border-t border-border px-3 py-2 text-sm; }
+  .tool-line.minor { @apply whitespace-normal; }
+  .tool-disclosure { @apply border-t border-border; }
+  .tool-disclosure summary { @apply px-3 py-3 text-sm font-semibold; }
+  .tool-form { @apply grid min-w-0 gap-2.5 p-3 text-sm; }
+  .tool-form label { @apply grid min-w-0 gap-1 font-semibold; }
+  .tool-form select, .tool-form input:not([type=checkbox]), .tool-form textarea {
+    @apply min-h-11 w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-1.5
+      text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary;
+  }
+  .tool-form .checkbox-label { @apply flex min-h-11 items-center gap-2; }
 }
 
 @media (max-width: 330px) {
