@@ -295,11 +295,8 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
         )
         monkeypatch.setattr(ui, "load_flight_snapshot", AsyncMock(return_value=card))
         for action, page in (
-            ("duty", 0),
-            ("weather", 0),
-            ("weather", 1),
-            ("route", 0),
-            ("notams", 0),
+            ("prep", 0),
+            ("prepcrew", 0),
             ("card", 0),
             ("refresh", 0),
         ):
@@ -312,7 +309,7 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
             buttons = u.callback_query.edit_message_text.call_args.kwargs[
                 "reply_markup"
             ].inline_keyboard
-            if action not in {"card", "refresh"}:
+            if action in {"prep", "prepcrew"}:
                 assert any(
                     b.callback_data == "fc:token:0:card:0"
                     for row in buttons
