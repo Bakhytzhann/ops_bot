@@ -158,7 +158,7 @@ def render_card(snapshot, preferences=None):
     hotels = crew.details.get("hotels", []) if crew else []
     lines.append(
         "HOTEL · " + (
-            " | ".join(f"{item[\u0027position\u0027]}: {item[\u0027name\u0027]}" for item in hotels)
+            " | ".join(f"{item['position']}: {item['name']}" for item in hotels)
             if hotels else "нет подтверждённых данных"
         )
     )
