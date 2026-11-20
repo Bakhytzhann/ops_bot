@@ -70,12 +70,13 @@ async def test_explicit_flight_updates_card_and_deletes_message(monkeypatch):
         "parse_ground_input",
         AsyncMock(return_value=("ABC123", [("CHOCKS_ON", now, {})])),
     )
-    record = Mock(return_value=True)
+    record_many = Mock(return_value=1)
     monkeypatch.setattr(
         ui,
         "ground_turns",
         SimpleNamespace(
-            record=record, observe=Mock(), events=Mock(return_value=[]),
+            record_many=record_many, observe=Mock(),
+            events=Mock(return_value=[]),
         ),
     )
     message = update_for("ABC123 колодки 1245z")
@@ -85,8 +86,8 @@ async def test_explicit_flight_updates_card_and_deletes_message(monkeypatch):
         bot=SimpleNamespace(delete_message=AsyncMock()),
     )
     await ui.handle_ground_text(message, context)
-    assert record.call_args.args == (turn, "CHOCKS_ON")
-    assert record.call_args.kwargs["request_id"] == "message:42:555:0"
+    assert record_many.call_args.args == (turn, [("CHOCKS_ON", now, {})])
+    assert record_many.call_args.kwargs["request_id"] == "message:42:555"
     context.bot.delete_message.assert_awaited_once_with(
         chat_id=42, message_id=555
     )
