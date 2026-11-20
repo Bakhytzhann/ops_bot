@@ -75,7 +75,7 @@ async def load_flight_handlers(flight):
     if isinstance(payload, dict) and payload.get("flightNid") == nid:
         payload = [payload]
     if not isinstance(payload, list):
-        raise ValueError("Leon flight detail response unavailable")
+        raise TypeError("Leon flight detail response unavailable")
     matched = [row for row in payload if isinstance(row, dict) and row.get("flightNid") == nid]
     if len(matched) != 1:
         raise ValueError("Leon flight detail mismatch")
@@ -99,7 +99,7 @@ async def load_flight_handlers(flight):
         match = _match(entries, agent)
         return {
             "station": station,
-            "name": agent["name"] or _text(match.get("name")) if match else agent["name"],
+            "name": agent["name"] or (_text(match.get("name")) if match else ""),
             "phone": _text(match.get("telephone")) if match else "",
             "email": _text(match.get("email")) if match else "",
         }
