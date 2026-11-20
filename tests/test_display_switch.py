@@ -43,7 +43,6 @@ def test_briefing_is_only_available_within_preparation(card):
     )
 
 
-
 @pytest.mark.asyncio
 async def test_switch_is_shared_between_sked_and_card_without_reload(card, monkeypatch):
     listing = {
@@ -78,6 +77,7 @@ async def test_switch_is_shared_between_sked_and_card_without_reload(card, monke
         button.text == "LT · IATA" for row in markup.inline_keyboard for button in row
     )
     loader.assert_not_awaited()
+
 
 @pytest.mark.asyncio
 async def test_briefing_is_loaded_only_after_preparation_click(card, monkeypatch):
