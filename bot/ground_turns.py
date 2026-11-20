@@ -618,12 +618,13 @@ async def handle_ground_text(update, context):
         screen = getattr(update, "main_screen", None)
         if screen is not None and screen.generation != context.user_data.get("screen_generation", 0):
             return
-        for position, (kind, at, detail) in enumerate(records):
-            await _record(
-                turn, kind, update,
-                f"message:{update.effective_chat.id}:{message.message_id}:{position}",
-                at, detail,
-            )
+        await asyncio.to_thread(
+            ground_turns.record_many,
+            turn,
+            records,
+            actor_id=update.effective_user.id,
+            request_id=f"message:{update.effective_chat.id}:{message.message_id}",
+        )
         state["enabled"] = True
         await _show_card(update, state, index)
     except GroundModelUnavailable:
