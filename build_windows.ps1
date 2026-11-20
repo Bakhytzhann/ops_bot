@@ -22,7 +22,7 @@ try {
     & $python -m PyInstaller --noconfirm --windowed "--$mode" --name 'OPS Bot' `
         --distpath $staging --workpath $build --specpath $build --icon $icon `
         --add-data "${icon}:desktop" --add-data "${countries}:services" `
-        --collect-data tzdata ops_manager.py
+        --collect-data tzdata --collect-data airportsdata ops_manager.py
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller failed with exit code $LASTEXITCODE."
     }
