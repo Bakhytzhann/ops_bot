@@ -279,8 +279,9 @@ async def load_ground_flights(*, now=None, refresh=False):
     async def load():
         data = await get_flight_schedule(start, end)
         legs, schedule_complete = _legs(data)
-        watch, watch_complete = await _load_watch(legs, now)
-        return legs, watch, schedule_complete, watch_complete, datetime.now(UTC)
+        # Ground Status deliberately uses Leon schedule/flight identity only.
+        # Live Flight Watch is not queried; all actual milestones are manual.
+        return legs, {}, schedule_complete, True, datetime.now(UTC)
 
     legs, watch, schedule_complete, watch_complete, fetched_at = await cache.get(
         (start, end), CACHE_SECONDS, load, refresh=refresh
