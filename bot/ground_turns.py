@@ -745,6 +745,16 @@ async def ground_turn_callback(update, context):
     if not turn.get("outbound_id") and (action == "target" or option == "OUT_BLOCK"):
         await query.answer("Вылет ещё не сопоставлен с рейсом Leon.", show_alert=True)
         return
+    if action == "tz" and not state.get("local"):
+        try:
+            zone = _airport_catalog()[turn["station"]]["tz"]
+            ZoneInfo(zone)
+        except (KeyError, ValueError, ZoneInfoNotFoundError):
+            await query.answer(
+                "Часовой пояс аэропорта не найден. Оставлено UTC.",
+                show_alert=True,
+            )
+            return
     await query.answer()
     try:
         if action == "tz":
