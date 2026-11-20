@@ -333,7 +333,10 @@ async def _handle_message(update, context):
         await handle_ground_turn_input(update, context)
         return
     if not command and accepts_sked_number(update, context):
-        await select_sked_number(update, context)
+        try:
+            await select_sked_number(update, context)
+        except ValueError as exc:
+            await message.reply_text(str(exc))
         return
     if not command and ground_text_accepted(context, text):
         await handle_ground_text(update, context)
