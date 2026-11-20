@@ -54,9 +54,7 @@ def context(monkeypatch):
 @pytest.fixture
 def identity(monkeypatch):
     monkeypatch.setattr(flight_card, "cache", SourceCache())
-    monkeypatch.setattr(
-        flight_card, "load_fast_foreflight", AsyncMock(return_value={})
-    )
+    monkeypatch.setattr(flight_card, "load_fast_foreflight", AsyncMock(return_value={}))
     u, c = current_user_id.set(42), current_chat_id.set(42)
     yield
     current_chat_id.reset(c)
@@ -64,7 +62,9 @@ def identity(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sked_seven_day_numbered_text_and_navigation(context, identity, monkeypatch):
+async def test_sked_seven_day_numbered_text_and_navigation(
+    context, identity, monkeypatch
+):
     query = AsyncMock(return_value={"flights": [flight(1)], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     u = update()
@@ -91,7 +91,9 @@ def test_all_flights_reachable_as_numbered_rows_across_pages():
     }
     for page in range(3):
         text, markup = browser.render_page("token", listing, page)
-        for index in range(page * browser.PAGE_SIZE, min((page + 1) * browser.PAGE_SIZE, len(rows))):
+        for index in range(
+            page * browser.PAGE_SIZE, min((page + 1) * browser.PAGE_SIZE, len(rows))
+        ):
             assert f"{index + 1}. ABC1265" in text
         assert all(
             not button.callback_data.startswith("fl:")
@@ -345,7 +347,6 @@ async def test_ai_does_not_block_back_navigation_or_overwrite_new_screen(
     back.callback_query.edit_message_text.assert_awaited_once()
 
 
-
 @pytest.mark.asyncio
 async def test_number_from_sked_opens_exact_flight_without_inline_flight_button(
     context, identity, monkeypatch
@@ -368,12 +369,16 @@ async def test_number_from_sked_opens_exact_flight_without_inline_flight_button(
     assert loader.call_args.args == (rows[1],)
     assert loader.call_args.kwargs["from_sked"] is True
     assert "ABC202" in typed.effective_message.reply_text.call_args.args[0]
-    assert context.user_data["flight_navigation"][(42, None)]["selected_flight_id"] == 202
+    assert (
+        context.user_data["flight_navigation"][(42, None)]["selected_flight_id"] == 202
+    )
     assert not browser.accepts_sked_number(update(text="hello"), context)
 
 
 @pytest.mark.asyncio
-async def test_seven_day_navigation_keeps_same_combined_view(context, identity, monkeypatch):
+async def test_seven_day_navigation_keeps_same_combined_view(
+    context, identity, monkeypatch
+):
     schedule = AsyncMock(return_value={"flights": [], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", schedule)
     await browser.show_week(update(), context, today=date(2026, 12, 29))
