@@ -387,6 +387,7 @@ async def handle_selection(update, context):
                 "view",
                 "time",
                 "codes",
+                *PREPARATION,
             }
         ):
             raise ValueError("Неизвестное действие карточки.")
@@ -397,6 +398,18 @@ async def handle_selection(update, context):
             action = listing.get("action", "card")
         snapshots = listing.setdefault("snapshots", {})
         snapshot = snapshots.get(position)
+        if kind == "fl" or snapshot is None or action == "refresh":
+            # Render known schedule data before any slow API calls. In the
+            # single-message UI this edits the same screen immediately.
+            basic = listing["flights"][position]
+            await edit_message_text(
+                query,
+                "FLIGHT CARD · " + flight_label(basic, preferences)
+                + "\n\nLeon schedule · получено\n"
+                "Экипаж, расчётное время и METAR · загружаются…",
+                disable_web_page_preview=True,
+            )
+
         if kind == "fl" or snapshot is None or action == "refresh":
             progress_lock = asyncio.Lock()
             last_progress = [""]
@@ -420,7 +433,7 @@ async def handle_selection(update, context):
             snapshot = await load_flight_snapshot(
                 listing["flights"][position],
                 refresh=action == "refresh",
-                on_update=None if getattr(update, "main_screen", None) else progress,
+                on_update=progress,
             )
             if position in snapshots:
                 listing.setdefault("previous", {})[position] = snapshots[position]
@@ -474,11 +487,61 @@ async def handle_selection(update, context):
                 )
             if listing["screen_revision"] != revision:
                 return
+        if action in {"prepnotams", "prepbriefing"} and not snapshot.blocks.get("briefing"):
+            from services.flight_foreflight import load_foreflight
+
+            await edit_message_text(
+                query, "ПОДГОТОВКА · " + flight_reference(snapshot.flight, preferences)
+                + "\nForeFlight briefing / NOTAM · загружаются…",
+            )
+            try:
+                snapshot.blocks.update(await load_foreflight(snapshot.flight))
+            except Exception:
+                snapshot.blocks["notams"] = SourceBlock(
+                    "ForeFlight", "Брифинг/NOTAM сейчас недоступны."
+                )
+        if action == "prepwx" and not snapshot.blocks.get("weather_taf"):
+            from services.operational_routes import selected_flight_weather
+
+            await edit_message_text(
+                query, "ПОДГОТОВКА · " + flight_reference(snapshot.flight, preferences)
+                + "\nMETAR / TAF · загружаются…",
+            )
+            try:
+                result = await selected_flight_weather(
+                    snapshot.flight, snapshot.flight["departureUTC"][:10],
+                    include_taf=True,
+                )
+                snapshot.blocks["weather_taf"] = SourceBlock(
+                    "Leon / AWC",
+                    result.get("answer") or "", "ready",
+                    details={"reports": list(result.get("reports", []))},
+                )
+            except Exception:
+                snapshot.blocks["weather_taf"] = SourceBlock(
+                    "Leon / AWC", "TAF: источник недоступен."
+                )
+        if listing["screen_revision"] != revision:
+            return
         if action in {"notams", "dep", "arr"}:
             action = "nlA_A" if action == "arr" else "nlD_A"
         listing["action"] = action
         page = int(page)
-        if valid_action(action):
+        if action in PREPARATION:
+            text = preparation_text(snapshot, action, preferences)
+            pages = [text[i:i + 3800] for i in range(0, len(text), 3800)] or ["нет данных"]
+            if page >= len(pages):
+                raise ValueError("Страница подготовки не найдена.")
+            text = pages[page]
+            markup = card_keyboard(snapshot, token, position, action, page, len(pages), preferences)
+            if action == "prepbriefing":
+                block = snapshot.blocks.get("briefing")
+                url = block.details.get("url") if block else None
+                if url:
+                    rows = list(markup.inline_keyboard)
+                    rows.insert(0, [InlineKeyboardButton("Открыть Briefing", url=url)])
+                    markup = InlineKeyboardMarkup(rows)
+        elif valid_action(action):
             text, markup = render_notams(
                 snapshot, token, position, action, page, preferences
             )
@@ -548,36 +611,78 @@ def card_keyboard(
             label, callback_data=f"fc:{token}:{position}:{target}:{number}"
         )
 
-    rows = [
-        [button("DUTY / REST", "duty"), button("WX / TAF", "weather")],
-        [button("RTE / ALTN", "route"), button("NOTAM", "notams")],
-        preference_buttons(token, preferences or {}, position=position)
-        + [
-            InlineKeyboardButton(
-                "Briefing", url=snapshot.blocks["briefing"].details["url"]
-            )
-            if snapshot.blocks.get("briefing")
-            and snapshot.blocks["briefing"].details.get("url")
-            else button("Briefing", "briefing")
-        ],
-    ]
-    if pages > 1:
-        rows.append(
-            ([button("←", action, page - 1)] if page else [])
-            + ([button("→", action, page + 1)] if page + 1 < pages else [])
-        )
-    if action not in {"card", "refresh"}:
-        rows.append([button("← К рейсу", "card")])
-    rows.append(
-        [
-            button("REFRESH", "refresh"),
-            InlineKeyboardButton(
-                "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
-            ),
+    if action.startswith("prep"):
+        rows = [
+            [button("CREW / FDP", "prepcrew"), button("WX / TAF", "prepwx")],
+            [button("NOTAM", "prepnotams"), button("Briefing", "prepbriefing")],
+            preference_buttons(token, preferences or {}, position=position),
+            [button("← К рейсу", "card")],
         ]
-    )
+    else:
+        rows = [
+            [button("Подготовка", "prep"), button("REFRESH", "refresh")],
+            preference_buttons(token, preferences or {}, position=position)
+            + [InlineKeyboardButton(
+                "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
+            )],
+        ]
+    if pages > 1:
+        rows.insert(0, [
+            *([button("←", action, page - 1)] if page else []),
+            *([button("→", action, page + 1)] if page + 1 < pages else []),
+        ])
     return InlineKeyboardMarkup(rows)
 
+
+PREPARATION = {"prep", "prepcrew", "prepwx", "prepnotams", "prepbriefing"}
+
+
+def preparation_text(snapshot, action, preferences=None):
+    heading = flight_reference(snapshot.flight, preferences)
+    if action == "prep":
+        return (
+            heading + "\n\nПОДГОТОВКА\n"
+            "Открывайте только нужный раздел. Загрузка брифинга по запросу.\n\n"
+            "CREW / FDP · индивидуальные расчёты Leon\n"
+            "WX / TAF · METAR и прогнозы\n"
+            "NOTAM · по брифингу ForeFlight\n"
+            "Briefing · отдельный документ ForeFlight"
+        )
+    if action == "prepcrew":
+        crew = snapshot.blocks.get("crew")
+        duty = snapshot.blocks.get("duty")
+        return (
+            heading + "\n\nCREW / FDP / DUTY / REST\n"
+            + (crew.text if crew else "Экипаж: нет данных")
+            + "\n\n" + (duty.text if duty else "Duty / Rest: нет данных")
+            + "\n\nHOTEL: не указан в доступных данных Leon."
+        )
+    if action == "prepwx":
+        from services.flight_weather import full_weather
+
+        original = snapshot.blocks.get("weather")
+        if snapshot.blocks.get("weather_taf"):
+            snapshot.blocks["weather"] = snapshot.blocks["weather_taf"]
+        try:
+            return heading + "\n\nWX / TAF\n" + full_weather(snapshot, preferences)
+        finally:
+            if original is None:
+                snapshot.blocks.pop("weather", None)
+            else:
+                snapshot.blocks["weather"] = original
+    if action == "prepnotams":
+        block = snapshot.blocks.get("notams")
+        return heading + "\n\nNOTAM\n" + (
+            block.text if block else "Брифинг не загружен."
+        )
+    if action == "prepbriefing":
+        block = snapshot.blocks.get("briefing")
+        url = block.details.get("url") if block else None
+        return heading + "\n\nBRIEFING\n" + (
+            "ForeFlight: ссылка получена. Откройте её кнопкой ниже."
+            if url else "Ссылка на брифинг недоступна."
+        )
+    raise ValueError("Неизвестный раздел подготовки.")
 
 def card_detail(snapshot, action, preferences=None):
     if action in {"card", "refresh"}:
