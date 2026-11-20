@@ -10,8 +10,8 @@ from services.flight_weather import (
     station_label,
     station_roles,
 )
-from services.foreflight_operations import duration
 from services.flight_weather_brief import CAT_I_REFERENCE, concise_weather
+from services.foreflight_operations import duration
 from services.notam_filters import notam_sets
 
 _COUNTRY_CODES = {
