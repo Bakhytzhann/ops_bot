@@ -35,7 +35,7 @@ def leon(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_applies_six_hours_to_estimates_and_actual_departures(leon):
+async def test_ground_status_only_uses_leon_schedule_not_flight_watch(leon):
     schedule, watch = leon
     schedule.return_value = {
         "complete": True,
@@ -48,64 +48,27 @@ async def test_applies_six_hours_to_estimates_and_actual_departures(leon):
             leg(6, "UAAA", "UUWW", "12:30", "13:40", status="OPTION"),
         ],
     }
-    watch.return_value = [
-        {
-            "flightNid": 1,
-            "flightWatch": {
-                "bloffIso": "2026-11-18T08:05:00Z",
-                "blonIso": "2026-11-18T11:50:00Z",
-            },
-        },
-        {
-            "flightNid": 2,
-            "flightWatch": {
-                "etdIso": "2026-11-18T13:00:00Z",
-                "etaIso": "2026-11-18T14:30:00Z",
-            },
-        },
-        {
-            "flightNid": "3",
-            "flightWatch": {
-                "etdIso": "2026-11-18T17:00:00Z",
-                "etaIso": "2026-11-18T19:00:00Z",
-            },
-        },
-        {
-            "flightNid": 4,
-            "flightWatch": {
-                "bloffIso": "2026-11-18T11:05:00Z",
-                "blonIso": "2026-11-18T11:45:00Z",
-            },
-        },
-        {"flightNid": 5, "flightWatch": {"etdIso": "2026-11-18T18:01:00Z"}},
-    ]
-
     board = await ground_flights.load_ground_flights(now=NOW)
     cards = {card["key"]: card for card in board["cards"]}
     assert board["schedule_complete"] and board["watch_complete"]
     assert cards["UACC:o:2"]["inbound_id"] == 1
-    assert cards["UACC:o:2"]["actual_in"].hour == 11
-    assert cards["UACC:o:2"]["estimated_out"].hour == 13
+    assert cards["UACC:o:2"]["actual_in"] is None
+    assert cards["UACC:o:2"]["estimated_out"] is None
     assert cards["UACC:o:2"]["planned_out"].hour == 12
-    assert cards["UUWW:o:3"]["status"] == "active"
-    assert cards["UUWW:o:3"]["reference_time"].hour == 17
-    assert cards["UAAA:o:4"]["status"] == "recent"
+    assert cards["UAAA:o:4"]["status"] == "active"
+    assert cards["UAAA:o:5"]["status"] == "active"
     arrival = cards["UAAA:i:2"]
-    assert arrival["status"] == "active"
     assert arrival["phase"] == "arrival"
-    assert arrival["estimated_landing"].minute == 30
-    assert arrival["estimated_in"] is None
+    assert arrival["estimated_landing"] is None
     assert "UACC:i:1" not in cards
-    assert not any(card["outbound_id"] in {5, 6} for card in cards.values())
-    assert set(watch.await_args.args[1]["flightNids"]) == {1, 2, 3, 4, 5}
+    assert not any(card["outbound_id"] == 6 for card in cards.values())
+    watch.assert_not_awaited()
     await ground_flights.load_ground_flights(now=NOW)
     schedule.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_incomplete_schedule_keeps_legs_independent_and_labels_missing_watch(
-    leon,
-):
+async def test_incomplete_schedule_does_not_fetch_flight_watch(leon):
     schedule, watch = leon
     schedule.return_value = {
         "complete": False,
@@ -114,15 +77,14 @@ async def test_incomplete_schedule_keeps_legs_independent_and_labels_missing_wat
             leg(2, "UACC", "UAAA", "12:30", "14:00"),
         ],
     }
-    watch.side_effect = RuntimeError("Leon Watch unavailable")
-
     board = await ground_flights.load_ground_flights(now=NOW)
     cards = {card["key"]: card for card in board["cards"]}
     assert not board["schedule_complete"]
-    assert not board["watch_complete"]
+    assert board["watch_complete"]
     assert cards["UACC:o:2"]["inbound_id"] is None
     assert cards["UACC:o:2"]["time_basis"] == "planned"
     assert cards["UACC:i:1"]["status"] == "active"
+    watch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

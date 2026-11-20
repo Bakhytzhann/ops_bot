@@ -190,13 +190,13 @@ async def test_snapshot_partial_errors_preserve_crew_and_weather(identity, monke
         AsyncMock(return_value={"answer": "METAR TEST"}),
     )
     monkeypatch.setattr(
-        snapshot, "load_foreflight", AsyncMock(side_effect=RuntimeError())
+        snapshot, "load_fast_foreflight", AsyncMock(side_effect=RuntimeError())
     )
     result = await snapshot.load_flight_snapshot(FLIGHT)
     assert result.blocks["crew"].status == "ready"
     assert "METAR TEST" in result.blocks["weather"].text
     assert result.blocks["duty"].status == "unavailable"
-    assert "количество не определено" in result.blocks["notams"].text
+    assert "Подготовка" in result.blocks["notams"].text
 
 
 @pytest.mark.asyncio

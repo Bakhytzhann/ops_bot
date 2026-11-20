@@ -59,7 +59,7 @@ def test_shared_events_are_idempotent_and_keep_baseline(tmp_path):
     assert store.baseline(turn(11)["key"]) is None
 
 
-def test_observe_keeps_leon_facts_separate_and_rejects_another_inbound(tmp_path):
+def test_observe_keeps_flight_identity_without_importing_leon_actuals(tmp_path):
     store = GroundTurnStore(tmp_path / "turns.sqlite")
     card = turn(10)
     observed = {
@@ -69,21 +69,16 @@ def test_observe_keeps_leon_facts_separate_and_rejects_another_inbound(tmp_path)
     }
     store.observe(observed)
     store.observe(observed)
-    store.observe(
-        {**observed, "inbound_id": 999, "actual_in": START + timedelta(minutes=5)}
-    )
+    assert store.events(card["key"]) == []
     assert record(store, card, "OUT_BLOCK", 63)
     events = store.events(card["key"])
     assert [(event["kind"], event["source"]) for event in events] == [
-        ("IN_BLOCK", "leon"),
-        ("OUT_BLOCK", "leon"),
         ("OUT_BLOCK", "telegram"),
     ]
-    assert (
-        datetime.fromisoformat(store.recent_outs([card["key"]])[card["key"]])
-        == observed["actual_out"]
-    )
-    assert store.station_history("UACC")["ground_duration"]["median_minutes"] == 60
+    assert datetime.fromisoformat(
+        store.recent_outs([card["key"]])[card["key"]]
+    ) == START + timedelta(minutes=63)
+    assert store.station_history("UACC")["ground_duration"]["count"] == 0
 
 
 def test_station_statistics_separate_service_wait_and_missing_data(tmp_path):
