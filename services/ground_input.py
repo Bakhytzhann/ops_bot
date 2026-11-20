@@ -78,6 +78,18 @@ def _event_time(text, now):
     return stamp
 
 
+def _time_in_input(value, source):
+    """Prevent the model from inventing UTC times absent from operator text."""
+    value = value.strip().upper().removesuffix("Z")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", value):
+        return value in source.upper().replace("Z", "")
+    digits = value.replace(":", "")
+    if not re.fullmatch(r"\d{4}", digits):
+        return False
+    candidates = re.findall(r"(?<!\d)(?:[01]\d|2[0-3]):[0-5]\d(?!\d)|(?<!\d)\d{4}(?!\d)", source)
+    return digits in {part.replace(":", "") for part in candidates}
+
+
 async def parse_ground_input(text, scope, *, now=None):
     if not 1 <= len(text.strip()) <= 600:
         raise ValueError("Введите короткую вводную до 600 символов.")
@@ -94,6 +106,8 @@ async def parse_ground_input(text, scope, *, now=None):
         raise ValueError("Не удалось определить событие. Уточните вводную.")
     if parsed.flight and not re.fullmatch(r"[A-Za-z0-9 -]{2,20}", parsed.flight):
         raise ValueError("Неверный номер рейса.")
+    if any(not _time_in_input(value, text) for value in (parsed.start, parsed.end) if value):
+        raise ValueError("Время не найдено в вашей вводной. Уточните отметку.")
     records = []
     if parsed.kind == "NOTE":
         if parsed.start or parsed.end:
