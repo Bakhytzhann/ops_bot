@@ -5,7 +5,6 @@ import json
 from pydantic import BaseModel, ConfigDict, Field
 
 
-
 class StationInterpretation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     frequent: list[str] = Field(max_length=3)
