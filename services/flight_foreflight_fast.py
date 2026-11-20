@@ -30,7 +30,11 @@ async def load_fast_foreflight(flight):
     result = {}
     if isinstance(detail, dict):
         data = detail.get("flightData") or {}
-        perf = performance if isinstance(performance, dict) else detail.get("performance") or {}
+        perf = (
+            performance.get("performance", performance)
+            if isinstance(performance, dict)
+            else detail.get("performance") or {}
+        )
         times = perf.get("times") or {}
         minutes = times.get("timeToDestinationMinutes")
         warning = bool(detail.get("errors") or perf.get("errors") or perf.get("warnings"))
