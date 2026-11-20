@@ -21,15 +21,16 @@ async def load_fast_foreflight(flight):
         a, b = instant(flight.get("departureUTC")), instant(row.get("departureTime"))
         if a is None or b is None or abs((b - a).total_seconds()) > 3600:
             raise ValueError("ForeFlight: время вылета не соответствует Leon.")
-        detail, overflight = await asyncio.gather(
+        detail, performance, overflight = await asyncio.gather(
             client.get_flight(row["flightId"]),
+            client.get_performance(row["flightId"]),
             client.get_overflight(row["flightId"]),
             return_exceptions=True,
         )
     result = {}
     if isinstance(detail, dict):
         data = detail.get("flightData") or {}
-        perf = detail.get("performance") or {}
+        perf = performance if isinstance(performance, dict) else detail.get("performance") or {}
         times = perf.get("times") or {}
         minutes = times.get("timeToDestinationMinutes")
         warning = bool(detail.get("errors") or perf.get("errors") or perf.get("warnings"))
