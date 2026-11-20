@@ -30,15 +30,13 @@ def test_target_three_lines_and_unique_roles(card):
     card.flight.update(aircraftType="E35L", aircraft="UP-TEST")
     card.blocks["route"].details["secondAlternate"] = "UAAA"
     text = render_card(card)
-    assert text.splitlines()[:2] == [
-        "ABC1265 UP-TEST 13NOV UAAA 0030z 0200z UGTB",
-        "Расчетное 01:30 · CREW VVI/YMA/RZA",
-    ]
-    assert text.count("UAAA (") == 2  # WX and NOTAM, without duplicate ALTN.
+    assert text.splitlines()[0] == "ABC1265 UP-TEST 13NOV UAAA 0030z 0200z UGTB"
+    assert "ETE 01:30" in text and "CREW VVI/YMA/RZA" in text
+    assert "WX · CURRENT METAR" in text
     assert "Пролеты: нет данных" in text and "DCT TEST" not in text
     assert "CPT: Test" not in text
     card.blocks["crew"].details["codes"] = []
-    assert "CREW" not in render_card(card)
+    assert "CREW нет данных" in render_card(card)
 
 
 def test_metar_aviation_tokens_and_rvr_only_when_supplied():
@@ -299,14 +297,14 @@ async def test_snapshot_stores_actual_crew_codes_and_loads_only_new_alternates(
     card.blocks["route"].details["secondAlternate"] = "UAAA"
     monkeypatch.setattr(
         snapshots,
-        "load_foreflight",
+        "load_fast_foreflight",
         AsyncMock(return_value={"route": card.blocks["route"]}),
     )
     alt = AsyncMock(return_value={"reports": [], "errors": []})
-    monkeypatch.setattr(snapshots, "alternate_reports", alt)
+    # Alternate weather is fetched only on demand in Preparation.
     result = await snapshots.load_flight_snapshot(card.flight)
     assert result.blocks["crew"].details["codes"] == ["VVI", "YMA"]
-    alt.assert_awaited_once_with(["UACC"])
+    alt.assert_not_awaited()
     assert "123" not in render_card(result)
 
 
