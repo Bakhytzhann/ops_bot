@@ -2,7 +2,11 @@
 import asyncio
 
 from services.foreflight_operations import (
-    ForeFlightClient, duration, find_flight, instant, normalized,
+    ForeFlightClient,
+    duration,
+    find_flight,
+    instant,
+    normalized,
 )
 from services.snapshot_models import SourceBlock
 
