@@ -662,7 +662,7 @@ def preparation_text(snapshot, action, preferences=None):
             + (crew.text if crew else "Экипаж: нет данных")
             + "\n\n" + (duty.text if duty else "Duty / Rest: нет данных")
             + "\n\nHOTEL: " + (
-                " | ".join(f"{item[\u0027position\u0027]}: {item[\u0027name\u0027]}"
+                " | ".join(f"{item['position']}: {item['name']}"
                          for item in crew.details.get("hotels", []))
                 if crew and crew.details.get("hotels")
                 else "не указан в доступных данных Leon."
