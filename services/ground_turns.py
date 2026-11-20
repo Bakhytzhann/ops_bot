@@ -268,6 +268,39 @@ class GroundTurnStore:
             )
             return bool(inserted.rowcount)
 
+    def record_many(self, turn, entries, *, actor_id, request_id):
+        """Commit all steps of an operator input as one transaction."""
+        if type(actor_id) is not int or not 0 < actor_id < 2**63:
+            raise ValueError("Неверный автор наземного события.")
+        base = _identifier(request_id, r"[A-Za-z0-9:_-]{1,140}")
+        if not 1 <= len(entries) <= 4:
+            raise ValueError("В одной вводной допускается от одного до четырёх событий.")
+        metadata = _metadata(turn)
+        prepared = []
+        for index, (kind, event_at, detail) in enumerate(entries):
+            if kind not in KINDS:
+                raise ValueError("Неизвестный этап наземного обслуживания.")
+            prepared.append(
+                (kind, _timestamp(event_at), _event_detail(kind, detail),
+                 f"{base}:{index}")
+            )
+        recorded_at = _timestamp(datetime.now(UTC))
+        count = 0
+        with self._connect() as conn:
+            self._observe(conn, metadata, recorded_at)
+            for kind, event_at, detail, unique_id in prepared:
+                result = conn.execute(
+                    """INSERT INTO ground_turn_events
+                         (turn_key,kind,event_at,actor_id,recorded_at,source,
+                          request_id,detail)
+                       VALUES (?,?,?,?,?,'telegram',?,?)
+                       ON CONFLICT(turn_key,request_id) DO NOTHING""",
+                    (metadata[0], kind, event_at, actor_id, recorded_at,
+                     unique_id, detail),
+                )
+                count += result.rowcount
+        return count
+
     def events(self, turn_key, limit=100):
         with self._connect() as conn:
             rows = conn.execute(
