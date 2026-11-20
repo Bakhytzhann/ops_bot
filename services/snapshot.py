@@ -156,9 +156,12 @@ async def load_flight_snapshot(
         try:
             await asyncio.wait_for(loader(), timeout=settings.snapshot_timeout)
         except Exception as exc:  # noqa: BLE001 -- source boundary; no payloads/URLs
-            label = {"crew": "Экипаж", "weather": "Погода", "foreflight": "ForeFlight", "handlers": "Handling"}[
-                name
-            ]
+            label = {
+                "crew": "Экипаж",
+                "weather": "Погода",
+                "foreflight": "ForeFlight",
+                "handlers": "Handling",
+            }[name]
             snapshot.blocks.setdefault(
                 name,
                 SourceBlock(
