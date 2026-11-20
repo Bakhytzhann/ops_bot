@@ -278,7 +278,7 @@ def _card_text(turn, events, *, local=False):
     outbound = turn.get("outbound_number")
     name = f"{inbound} → {outbound}" if inbound and outbound else outbound or inbound or "Рейс"
     reference = turn.get("planned_in") or turn.get("planned_out")
-    date = _stamp(reference, date=True).split(" ")[0] if reference else ""
+    date = utc(reference).strftime("%d %b %Y").upper() if reference else ""
     lines = [
         f"GROUND STATUS | {station}",
         name,
@@ -300,9 +300,9 @@ def _card_text(turn, events, *, local=False):
             if key not in handled:
                 lines.append(f"{label}: {_stamp_for(latest[key], station, local)}")
 
-    if turn.get("inbound_id"):
+    if turn.get("inbound_id") or any(key in latest for key, _ in ARRIVAL_EVENTS):
         section("ARRIVAL", ARRIVAL_EVENTS)
-    if turn.get("outbound_id"):
+    if turn.get("outbound_id") or any(key in latest for key, _ in DEPARTURE_EVENTS):
         section("DEPARTURE", DEPARTURE_EVENTS)
     if not turn.get("inbound_id") and not turn.get("outbound_id"):
         section("EVENTS", (*ARRIVAL_EVENTS, *DEPARTURE_EVENTS))
@@ -609,6 +609,9 @@ async def handle_ground_text(update, context):
             index = state["current"]
 
         turn = state["cards"][index]
+        screen = getattr(update, "main_screen", None)
+        if screen is not None and screen.generation != context.user_data.get("screen_generation", 0):
+            return
         for position, (kind, at, detail) in enumerate(records):
             await _record(
                 turn, kind, update,
