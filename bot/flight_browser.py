@@ -157,7 +157,7 @@ def accepts_sked_number(update, context):
     if not re.fullmatch(r"[1-9]\d{0,3}", text):
         return False
     _, listing = selected_schedule(context, update)
-    return bool(listing and int(text) <= len(listing["flights"]))
+    return bool(listing)
 
 
 async def select_sked_number(update, context):
@@ -656,7 +656,12 @@ def preparation_text(snapshot, action, preferences=None):
             heading + "\n\nCREW / FDP / DUTY / REST\n"
             + (crew.text if crew else "Экипаж: нет данных")
             + "\n\n" + (duty.text if duty else "Duty / Rest: нет данных")
-            + "\n\nHOTEL: не указан в доступных данных Leon."
+            + "\n\nHOTEL: " + (
+                " | ".join(f"{item[\u0027position\u0027]}: {item[\u0027name\u0027]}"
+                         for item in crew.details.get("hotels", []))
+                if crew and crew.details.get("hotels")
+                else "не указан в доступных данных Leon."
+            )
         )
     if action == "prepwx":
         from services.flight_weather import full_weather
