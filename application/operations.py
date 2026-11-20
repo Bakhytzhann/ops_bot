@@ -25,9 +25,10 @@ async def flight_schedule(date, end_date=None):
 async def prepare_flight(
     selected, *, refresh=False, on_update=None, from_sked=False
 ):
-    return await load_flight_snapshot(
-        selected, refresh=refresh, on_update=on_update, from_sked=from_sked
-    )
+    options = {"refresh": refresh, "on_update": on_update}
+    if from_sked:
+        options["from_sked"] = True
+    return await load_flight_snapshot(selected, **options)
 
 
 async def preparation_by_number(number, day):
