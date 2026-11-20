@@ -194,6 +194,7 @@ async def select_sked_number(update, context):
     bot = getattr(context, "bot", None)
     if bot is not None and getattr(update.effective_message, "message_id", None):
         from contextlib import suppress
+
         from telegram.error import TelegramError
 
         with suppress(TelegramError, AttributeError):
@@ -500,7 +501,7 @@ async def handle_selection(update, context):
             )
             try:
                 snapshot.blocks.update(await load_foreflight(snapshot.flight))
-            except Exception:
+            except Exception:  # noqa: BLE001 -- optional external source boundary
                 snapshot.blocks["notams"] = SourceBlock(
                     "ForeFlight", "Брифинг/NOTAM сейчас недоступны."
                 )
@@ -521,7 +522,7 @@ async def handle_selection(update, context):
                     result.get("answer") or "", "ready",
                     details={"reports": list(result.get("reports", []))},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 -- optional external source boundary
                 snapshot.blocks["weather_taf"] = SourceBlock(
                     "Leon / AWC", "TAF: источник недоступен."
                 )
