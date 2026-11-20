@@ -20,20 +20,38 @@ FLIGHT = {
 async def test_flight_assigned_handling_matches_directory_id_only(monkeypatch):
     api = AsyncMock(
         side_effect=[
-            [{
-                "flightNid": 101,
-                "handlingAdep": {"handler": {"handlerNid": 10, "name": "ABC Handling"}},
-                "handlingAdes": {"handler": {"handlerNid": 20, "name": "Arrival Service"}},
-            }],
             [
-                {"handlerNid": 99, "name": "Favourite Agent", "isFavorite": True,
-                 "email": "wrong@example.test"},
-                {"handlerNid": 10, "name": "ABC Handling", "telephone": "+111",
-                 "email": "ops@example.test"},
+                {
+                    "flightNid": 101,
+                    "handlingAdep": {
+                        "handler": {"handlerNid": 10, "name": "ABC Handling"}
+                    },
+                    "handlingAdes": {
+                        "handler": {"handlerNid": 20, "name": "Arrival Service"}
+                    },
+                }
             ],
             [
-                {"handlerNid": 20, "name": "Arrival Service", "telephone": "+222",
-                 "email": "arr@example.test"},
+                {
+                    "handlerNid": 99,
+                    "name": "Favourite Agent",
+                    "isFavorite": True,
+                    "email": "wrong@example.test",
+                },
+                {
+                    "handlerNid": 10,
+                    "name": "ABC Handling",
+                    "telephone": "+111",
+                    "email": "ops@example.test",
+                },
+            ],
+            [
+                {
+                    "handlerNid": 20,
+                    "name": "Arrival Service",
+                    "telephone": "+222",
+                    "email": "arr@example.test",
+                },
             ],
         ]
     )
@@ -56,13 +74,15 @@ async def test_airport_directory_never_becomes_assigned_agent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_duplicate_directory_name_does_not_leak_contacts(monkeypatch):
-    api = AsyncMock(side_effect=[
-        [{"flightNid": 101, "handlingAdep": {"name": "Same Agent"}}],
-        [
-            {"name": "Same Agent", "telephone": "+111"},
-            {"name": "Same Agent", "telephone": "+222"},
-        ],
-    ])
+    api = AsyncMock(
+        side_effect=[
+            [{"flightNid": 101, "handlingAdep": {"name": "Same Agent"}}],
+            [
+                {"name": "Same Agent", "telephone": "+111"},
+                {"name": "Same Agent", "telephone": "+222"},
+            ],
+        ]
+    )
     monkeypatch.setattr(flight_handlers, "call_leon", api)
     block = await flight_handlers.load_flight_handlers(FLIGHT)
     text = flight_handlers.format_handlers(block, FLIGHT)
