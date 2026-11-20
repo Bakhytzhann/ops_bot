@@ -207,10 +207,10 @@ def _back(state):
     return _button(state, "← К рейсам", "list", category, page)
 
 
-
 @lru_cache(maxsize=1)
 def _airport_catalog():
     import airportsdata
+
     return airportsdata.load("ICAO")
 
 
@@ -276,7 +276,11 @@ def _card_text(turn, events, *, local=False):
     station = turn["station"]
     inbound = turn.get("inbound_number")
     outbound = turn.get("outbound_number")
-    name = f"{inbound} → {outbound}" if inbound and outbound else outbound or inbound or "Рейс"
+    name = (
+        f"{inbound} → {outbound}"
+        if inbound and outbound
+        else outbound or inbound or "Рейс"
+    )
     reference = turn.get("planned_in") or turn.get("planned_out")
     date = utc(reference).strftime("%d %b %Y").upper() if reference else ""
     lines = [
@@ -292,7 +296,11 @@ def _card_text(turn, events, *, local=False):
         lines.extend(("", title))
         handled = set()
         for first, last, name in GROUPED_EVENTS:
-            if first in latest and last in latest and any(key == first for key, _ in allowed):
+            if (
+                first in latest
+                and last in latest
+                and any(key == first for key, _ in allowed)
+            ):
                 times = f"{_stamp_for(latest[first], station, local)} / {_stamp_for(latest[last], station, local)}"
                 lines.append(f"{name}: {times}")
                 handled.update((first, last))
@@ -312,7 +320,9 @@ def _card_text(turn, events, *, local=False):
         if len(notes) > 12:
             lines.append(f"Ещё {len(notes) - 12} заметок в журнале.")
     if not latest and not notes:
-        lines.extend(("", "Пока нет ручных отметок.", "Напишите, например: посадка 1245z"))
+        lines.extend(
+            ("", "Пока нет ручных отметок.", "Напишите, например: посадка 1245z")
+        )
     return "\n".join(lines)
 
 
@@ -331,7 +341,9 @@ async def _show_card(update, state, index):
         ],
         [_back(state)],
     ]
-    await _render(update, _card_text(turn, events, local=state.get("local", False)), rows)
+    await _render(
+        update, _card_text(turn, events, local=state.get("local", False)), rows
+    )
 
 
 async def _show_station_stats(update, state, index):
@@ -347,7 +359,9 @@ async def _show_station_stats(update, state, index):
     ]
     for label, metric in report["metrics"].items():
         if metric["count"]:
-            lines.append(f"{label}: {metric['mean_minutes']:g} мин (n={metric['count']})")
+            lines.append(
+                f"{label}: {metric['mean_minutes']:g} мин (n={metric['count']})"
+            )
     if lines[-1] == "СРЕДНИЕ ВРЕМЕНА":
         lines.append("Пока недостаточно завершённых интервалов.")
     most_common = sorted(
@@ -357,8 +371,7 @@ async def _show_station_stats(update, state, index):
     if most_common:
         lines.extend(("", "ЧАСТЫЕ ЭТАПЫ"))
         lines.extend(
-            f"{EVENTS.get(kind, kind)}: {count} рейс(ов)"
-            for kind, count in most_common
+            f"{EVENTS.get(kind, kind)}: {count} рейс(ов)" for kind, count in most_common
         )
     lines.extend(("", "ПРОБЛЕМЫ И РИСКИ"))
     try:
@@ -370,9 +383,19 @@ async def _show_station_stats(update, state, index):
             lines.append("По сохранённым заметкам выводов пока нет.")
         else:
             if result.frequent:
-                lines.extend(("Повторяющиеся проблемы:", *(f"• {item}" for item in result.frequent)))
+                lines.extend(
+                    (
+                        "Повторяющиеся проблемы:",
+                        *(f"• {item}" for item in result.frequent),
+                    )
+                )
             if result.critical:
-                lines.extend(("Критичные случаи из истории:", *(f"• {item}" for item in result.critical)))
+                lines.extend(
+                    (
+                        "Критичные случаи из истории:",
+                        *(f"• {item}" for item in result.critical),
+                    )
+                )
             lines.append("Актуальность старых происшествий требует проверки.")
     await _render(update, "\n".join(lines), [[_return_to_card(state, index)]])
 
@@ -536,7 +559,6 @@ async def _prompt(update, state, index, action, option=None):
     await _render(update, text, [[_return_to_card(state, index)]])
 
 
-
 EXPLICIT_FLIGHT = re.compile(r"^\s*([A-Z]{2,3}\s?-?\d{2,5})\b", re.IGNORECASE)
 
 
@@ -546,7 +568,10 @@ def ground_text_accepted(context, text):
         text.strip()
         and (
             (state and state.get("enabled") and state.get("current") is not None)
-            or (EXPLICIT_FLIGHT.match(text) and text[EXPLICIT_FLIGHT.match(text).end():].strip())
+            or (
+                EXPLICIT_FLIGHT.match(text)
+                and text[EXPLICIT_FLIGHT.match(text).end() :].strip()
+            )
         )
     )
 
@@ -563,11 +588,12 @@ async def handle_ground_text(update, context):
     text = (message.text or "").strip()
     explicit_match = EXPLICIT_FLIGHT.match(text)
     explicit = (
-        re.sub(r"[\s-]", "", explicit_match.group(1)).upper()
-        if explicit_match else ""
+        re.sub(r"[\s-]", "", explicit_match.group(1)).upper() if explicit_match else ""
     )
     state = context.user_data.get(STATE_KEY)
-    if not explicit and not (state and state.get("enabled") and state.get("current") is not None):
+    if not explicit and not (
+        state and state.get("enabled") and state.get("current") is not None
+    ):
         return
     try:
         _, records = await parse_ground_input(
@@ -579,15 +605,21 @@ async def handle_ground_text(update, context):
         if not state or (explicit and not state.get("cards")):
             snapshot = await load_ground_flights()
             state = {
-                "token": token_hex(5), "cards": snapshot["cards"], "snapshot": snapshot,
-                "view": ("active", 0), "current": None, "local": False,
-                "enabled": True, "pending": None,
+                "token": token_hex(5),
+                "cards": snapshot["cards"],
+                "snapshot": snapshot,
+                "view": ("active", 0),
+                "current": None,
+                "local": False,
+                "enabled": True,
+                "pending": None,
             }
             context.user_data[STATE_KEY] = state
 
         if explicit:
             matches = [
-                index for index, turn in enumerate(state["cards"])
+                index
+                for index, turn in enumerate(state["cards"])
                 if any(
                     re.sub(r"[\s-]", "", str(turn.get(key) or "")).upper() == explicit
                     for key in ("inbound_number", "outbound_number")
@@ -599,15 +631,18 @@ async def handle_ground_text(update, context):
                 state["cards"] = snapshot["cards"]
                 state["snapshot"] = snapshot
                 matches = [
-                    index for index, turn in enumerate(state["cards"])
+                    index
+                    for index, turn in enumerate(state["cards"])
                     if any(
-                        re.sub(r"[\s-]", "", str(turn.get(key) or "")).upper() == explicit
+                        re.sub(r"[\s-]", "", str(turn.get(key) or "")).upper()
+                        == explicit
                         for key in ("inbound_number", "outbound_number")
                     )
                 ]
             if len(matches) != 1:
                 raise ValueError(
-                    f"Рейс {explicit} не найден." if not matches
+                    f"Рейс {explicit} не найден."
+                    if not matches
                     else f"Найдено несколько рейсов {explicit}. Откройте нужную карточку."
                 )
             index = matches[0]
@@ -616,7 +651,9 @@ async def handle_ground_text(update, context):
 
         turn = state["cards"][index]
         screen = getattr(update, "main_screen", None)
-        if screen is not None and screen.generation != context.user_data.get("screen_generation", 0):
+        if screen is not None and screen.generation != context.user_data.get(
+            "screen_generation", 0
+        ):
             return
         await asyncio.to_thread(
             ground_turns.record_many,
@@ -628,11 +665,16 @@ async def handle_ground_text(update, context):
         state["enabled"] = True
         await _show_card(update, state, index)
     except GroundModelUnavailable:
-        await message.reply_text("Qwen сейчас недоступен. Вводная не записана, попробуйте ещё раз.")
+        await message.reply_text(
+            "Qwen сейчас недоступен. Вводная не записана, попробуйте ещё раз."
+        )
         return
     except (ValueError, OSError, sqlite3.Error, HTTPError, TimeoutError) as exc:
-        await message.reply_text(str(exc) if isinstance(exc, ValueError)
-                                 else "Вводную не удалось сохранить. Повторите попытку.")
+        await message.reply_text(
+            str(exc)
+            if isinstance(exc, ValueError)
+            else "Вводную не удалось сохранить. Повторите попытку."
+        )
         return
 
     # Keep operator chats clean, but never delete input before the write completes.
