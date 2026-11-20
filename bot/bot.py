@@ -56,6 +56,7 @@ from bot.ground_turns import (
 from bot.keyboards import SCHEDULE_BUTTON
 from bot.main_screen import HOME_ACTIONS, dispatch_screen
 from bot.message_edits import edit_message_text
+from bot.miniapp import configure_mini_app
 from bot.ops_brief import ops_brief_callback, show_ops_brief
 from config.instance_lock import windows_instance
 from config.settings import settings
@@ -415,6 +416,7 @@ async def setup_telegram(application):
         timing_logger.warning(
             "Telegram command menu setup failed: {}", type(exc).__name__
         )
+    await configure_mini_app(application.bot, settings.telegram_mini_app_url)
 
 
 async def screen_message_handler(update, context):

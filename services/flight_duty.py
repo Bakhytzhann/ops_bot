@@ -10,6 +10,12 @@ from integrations.leon.tools import call_leon
 from services.snapshot_models import SourceBlock, utc, zulu
 
 _slots = asyncio.Semaphore(3)
+FTL_METRICS = (
+    ("fdpLength", "FDP"),
+    ("dutyLimitedLength", "Duty duration"),
+    ("restBeforeDuty", "Rest Before"),
+    ("restAfterDuty", "Rest After"),
+)
 
 
 def ftl_days(data):
@@ -24,8 +30,7 @@ def ftl_days(data):
     return envelope["calculations"]
 
 
-def seconds_duration(value):
-    """Leon FTL durations are seconds, independently checked against reporting times."""
+def duration_value(value):
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
@@ -33,11 +38,16 @@ def seconds_duration(value):
         or value < 0
         or value >= 2**31 - 1
     ):
-        return "нет данных"
+        return None
     seconds = int(value)
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}" + (f":{seconds:02d}" if seconds else "")
+
+
+def seconds_duration(value):
+    """Leon FTL durations are seconds, independently checked against reporting times."""
+    return duration_value(value) or "нет данных"
 
 
 def flight_calculation(data, flight_nid):
@@ -122,12 +132,7 @@ def flight_ftl(data, flight_nid):
     lines = ["FTL / REST"]
     violations = []
     shown = set()
-    for key, title in (
-        ("fdpLength", "FDP"),
-        ("dutyLimitedLength", "Duty duration"),
-        ("restBeforeDuty", "Rest Before"),
-        ("restAfterDuty", "Rest After"),
-    ):
+    for key, title in FTL_METRICS:
         metric = result.get(key)
         if not isinstance(metric, dict):
             lines.append(title + ": нет данных")
@@ -226,6 +231,7 @@ async def load_duty(flight, crew):
         )
         position = member.get("position") or {}
         label = f"{position.get('name') or 'Crew'}: {name}"
+        result = {"metrics": [], "start": None, "end": None, "reporting": False}
         if (type(nid) is not int or nid <= 0) and type(
             contact.get("contactNid")
         ) is int:
@@ -244,7 +250,7 @@ async def load_duty(flight, crew):
             except (RuntimeError, TypeError, OSError):
                 nid = None
         if type(nid) is not int or nid <= 0:
-            return label + "\nDuty / Rest: нет подтверждённого loginNid.", False
+            return label + "\nDuty / Rest: нет подтверждённого loginNid.", False, result
         async with _slots:
             roster, ftl = await asyncio.gather(
                 call_leon(
@@ -300,6 +306,7 @@ async def load_duty(flight, crew):
             else:
                 start = end = None
             if start and end:
+                result.update(start=start, end=end, reporting=bool(window))
                 lines.append(
                     f"{prefix}: {zulu(start)} → {zulu(end)} · {seconds_duration((end - start).total_seconds())}"
                 )
@@ -316,6 +323,16 @@ async def load_duty(flight, crew):
         except (RuntimeError, TypeError):
             lines.append("DUTY: нет данных")
         if calculation is not None:
+            result["metrics"] = [
+                {
+                    "name": title,
+                    "actual": duration_value(metric.get("actual")),
+                    "limit": duration_value(metric.get("limit")),
+                    "offence": metric.get("offence") is True,
+                }
+                for key, title in FTL_METRICS
+                if isinstance(metric := calculation.get(key), dict)
+            ]
             metrics = flight_ftl(ftl, flight["flightNid"])
             next_eobt = [line for line in metrics if line.startswith("nextEOBT:")]
             lines.extend(line for line in metrics if not line.startswith("nextEOBT:"))
@@ -328,7 +345,7 @@ async def load_duty(flight, crew):
                     "Следующий допустимый старт после отдыха: не проверено.",
                 ]
             )
-        return "\n".join(lines), valid_roster
+        return "\n".join(lines), valid_roster, result
 
     results = await asyncio.gather(
         *(member_duty(m) for m in members), return_exceptions=True
@@ -378,5 +395,9 @@ async def load_duty(flight, crew):
             ),
             "summary": "\n".join(summary),
             "duration_unit": "seconds",
+            "assignments": [
+                None if isinstance(result, Exception) else result[2]
+                for result in results
+            ],
         },
     )

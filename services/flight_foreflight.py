@@ -70,6 +70,7 @@ async def load_foreflight(flight, partial=None):
                 "generated": document.get("timeGenerated")
                 if isinstance(document, dict)
                 else None,
+                "departure_offset_minutes": difference,
             },
         )
     }

@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -39,6 +40,7 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: SecretStr | None = None
+    telegram_mini_app_url: str = ""
     telegram_allowed_user_ids: str = ""
     telegram_admin_ids: str = ""
     charter_sales_user_ids: str = ""
@@ -80,6 +82,23 @@ class Settings(BaseSettings):
     @classmethod
     def resolve_path(cls, value):
         return (project_directory() / value).resolve()
+
+    @field_validator("telegram_mini_app_url")
+    @classmethod
+    def validate_mini_app_url(cls, value):
+        if not value:
+            return value
+        url = urlsplit(value)
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.fragment
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("The Telegram Mini App URL must be a valid HTTPS URL")
+        return value
 
     @property
     def admin_ids(self) -> set[int]:
