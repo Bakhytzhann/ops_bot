@@ -3,12 +3,14 @@
 import asyncio
 import re
 import sqlite3
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from secrets import token_hex
 
 from httpx import HTTPError
+from telegram.error import TelegramError
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.admission import require_user
@@ -99,6 +101,7 @@ async def show_ground_turns(update, context, *, refresh=False):
         "pending": None,
         "current": None,
         "local": False,
+        "enabled": True,
     }
     context.user_data[STATE_KEY] = state
     await _render(update, "GROUND STATUS · Загружаю актуальные рейсы Leon…", [])
@@ -319,6 +322,7 @@ async def _show_card(update, state, index):
     if state.get("current") != index:
         state["local"] = False  # UTC is always the default for each card.
     state["current"] = index
+    state["enabled"] = True
     await asyncio.to_thread(ground_turns.observe, turn)
     events = await asyncio.to_thread(ground_turns.events, turn["key"], limit=250)
     rows = [
@@ -521,6 +525,112 @@ async def _prompt(update, state, index, action, option=None):
         text += "\nПример: Ждём топливную машину | 14:00\nЕсли срока нет, напишите только причину."
     state["pending"] = (index, action, option)
     await _render(update, text, [[_return_to_card(state, index)]])
+
+
+
+EXPLICIT_FLIGHT = re.compile(r"^\s*([A-Z]{2,3}\s?-?\d{2,5})\b", re.IGNORECASE)
+
+
+def ground_text_accepted(context, text):
+    state = context.user_data.get(STATE_KEY)
+    return bool(
+        text.strip()
+        and (
+            (state and state.get("enabled") and state.get("current") is not None)
+            or EXPLICIT_FLIGHT.match(text)
+        )
+    )
+
+
+def deactivate_ground(context):
+    if state := context.user_data.get(STATE_KEY):
+        state["enabled"] = False
+
+
+async def handle_ground_text(update, context):
+    """Record natural-language input against the selected or explicit Leon flight."""
+    require_user(update)
+    message = update.effective_message
+    text = (message.text or "").strip()
+    explicit_match = EXPLICIT_FLIGHT.match(text)
+    explicit = (
+        re.sub(r"[\s-]", "", explicit_match.group(1)).upper()
+        if explicit_match else ""
+    )
+    state = context.user_data.get(STATE_KEY)
+    if not explicit and not (state and state.get("enabled") and state.get("current") is not None):
+        return
+    try:
+        model_flight, records = await parse_ground_input(
+            text, (update.effective_chat.id, update.effective_user.id)
+        )
+        if model_flight and not explicit:
+            # Reject imagined flight identities; only an explicit written number
+            # or the currently selected card may be used.
+            if not re.search(r"\b" + re.escape(model_flight) + r"\b", text, re.IGNORECASE):
+                raise ValueError("Не удалось уверенно определить рейс.")
+            explicit = re.sub(r"[\s-]", "", model_flight).upper()
+
+        if not state or (explicit and not state.get("cards")):
+            snapshot = await load_ground_flights()
+            state = {
+                "token": token_hex(5), "cards": snapshot["cards"], "snapshot": snapshot,
+                "view": ("active", 0), "current": None, "local": False,
+                "enabled": True, "pending": None,
+            }
+            context.user_data[STATE_KEY] = state
+
+        if explicit:
+            matches = [
+                index for index, turn in enumerate(state["cards"])
+                if any(
+                    re.sub(r"[\s-]", "", str(turn.get(key) or "")).upper() == explicit
+                    for key in ("inbound_number", "outbound_number")
+                )
+            ]
+            if not matches:
+                # Source may have been refreshed since the last visit.
+                snapshot = await load_ground_flights(refresh=True)
+                state["cards"] = snapshot["cards"]
+                state["snapshot"] = snapshot
+                matches = [
+                    index for index, turn in enumerate(state["cards"])
+                    if any(
+                        re.sub(r"[\s-]", "", str(turn.get(key) or "")).upper() == explicit
+                        for key in ("inbound_number", "outbound_number")
+                    )
+                ]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"Рейс {explicit} не найден." if not matches
+                    else f"Найдено несколько рейсов {explicit}. Откройте нужную карточку."
+                )
+            index = matches[0]
+        else:
+            index = state["current"]
+
+        turn = state["cards"][index]
+        for position, (kind, at, detail) in enumerate(records):
+            await _record(
+                turn, kind, update,
+                f"message:{update.effective_chat.id}:{message.message_id}:{position}",
+                at, detail,
+            )
+        state["enabled"] = True
+        await _show_card(update, state, index)
+    except AnalysisUnavailable:
+        await message.reply_text("Qwen сейчас недоступен. Вводная не записана, попробуйте ещё раз.")
+        return
+    except (ValueError, OSError, sqlite3.Error, HTTPError, TimeoutError) as exc:
+        await message.reply_text(str(exc) if isinstance(exc, ValueError)
+                                 else "Вводную не удалось сохранить. Повторите попытку.")
+        return
+
+    # Keep operator chats clean, but never delete input before the write completes.
+    with suppress(AttributeError, TelegramError):
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id, message_id=message.message_id
+        )
 
 
 async def handle_ground_turn_input(update, context):
