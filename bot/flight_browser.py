@@ -106,13 +106,11 @@ def render_page(token, listing, page=0):
     start = page * PAGE_SIZE
     lines = [
         "SKED · " + schedule_heading(listing["start"], listing["end"]),
-        "Режим: " + (
-            "LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"
-        ),
+        "Режим: " + ("LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"),
         "",
     ]
     previous_day = None
-    for index, flight in enumerate(flights[start:start + PAGE_SIZE], start):
+    for index, flight in enumerate(flights[start : start + PAGE_SIZE], start):
         day = flight_date(flight, preferences)
         if day != previous_day:
             if previous_day is not None:
@@ -129,16 +127,28 @@ def render_page(token, listing, page=0):
     if pages > 1:
         navigation = []
         if page:
-            navigation.append(InlineKeyboardButton("← Страница", callback_data=f"wk:{token}:{page - 1}"))
+            navigation.append(
+                InlineKeyboardButton(
+                    "← Страница", callback_data=f"wk:{token}:{page - 1}"
+                )
+            )
         if page + 1 < pages:
-            navigation.append(InlineKeyboardButton("Страница →", callback_data=f"wk:{token}:{page + 1}"))
+            navigation.append(
+                InlineKeyboardButton(
+                    "Страница →", callback_data=f"wk:{token}:{page + 1}"
+                )
+            )
         rows.append(navigation)
-    rows.append([
-        InlineKeyboardButton("← 7 дней", callback_data=f"sk:{token}:prev"),
-        InlineKeyboardButton("7 дней →", callback_data=f"sk:{token}:next"),
-    ])
+    rows.append(
+        [
+            InlineKeyboardButton("← 7 дней", callback_data=f"sk:{token}:prev"),
+            InlineKeyboardButton("7 дней →", callback_data=f"sk:{token}:next"),
+        ]
+    )
     rows.append(preference_buttons(token, preferences))
-    rows.append([InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh")])
+    rows.append(
+        [InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh")]
+    )
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
@@ -188,7 +198,9 @@ async def select_sked_number(update, context):
     )
     await handle_selection(proxy, context)
     screen = getattr(update, "main_screen", None)
-    if screen is not None and screen.generation != context.user_data.get("screen_generation", 0):
+    if screen is not None and screen.generation != context.user_data.get(
+        "screen_generation", 0
+    ):
         return
     # Never remove a numeric input until the selected card has been displayed.
     bot = getattr(context, "bot", None)
@@ -408,7 +420,8 @@ async def handle_selection(update, context):
             basic = listing["flights"][position]
             await edit_message_text(
                 query,
-                "FLIGHT CARD · " + flight_label(basic, preferences)
+                "FLIGHT CARD · "
+                + flight_label(basic, preferences)
                 + "\n\nLeon schedule · получено\n"
                 "Экипаж, расчётное время и METAR · загружаются…",
                 disable_web_page_preview=True,
@@ -492,11 +505,15 @@ async def handle_selection(update, context):
                 )
             if listing["screen_revision"] != revision:
                 return
-        if action in {"prepnotams", "prepbriefing"} and not snapshot.blocks.get("briefing"):
+        if action in {"prepnotams", "prepbriefing"} and not snapshot.blocks.get(
+            "briefing"
+        ):
             from services.flight_foreflight import load_foreflight
 
             await edit_message_text(
-                query, "ПОДГОТОВКА · " + flight_reference(snapshot.flight, preferences)
+                query,
+                "ПОДГОТОВКА · "
+                + flight_reference(snapshot.flight, preferences)
                 + "\nForeFlight briefing / NOTAM · загружаются…",
             )
             try:
@@ -509,17 +526,21 @@ async def handle_selection(update, context):
             from services.operational_routes import selected_flight_weather
 
             await edit_message_text(
-                query, "ПОДГОТОВКА · " + flight_reference(snapshot.flight, preferences)
+                query,
+                "ПОДГОТОВКА · "
+                + flight_reference(snapshot.flight, preferences)
                 + "\nMETAR / TAF · загружаются…",
             )
             try:
                 result = await selected_flight_weather(
-                    snapshot.flight, snapshot.flight["departureUTC"][:10],
+                    snapshot.flight,
+                    snapshot.flight["departureUTC"][:10],
                     include_taf=True,
                 )
                 snapshot.blocks["weather_taf"] = SourceBlock(
                     "Leon / AWC",
-                    result.get("answer") or "", "ready",
+                    result.get("answer") or "",
+                    "ready",
                     details={"reports": list(result.get("reports", []))},
                 )
             except Exception:  # noqa: BLE001 -- optional external source boundary
@@ -534,11 +555,15 @@ async def handle_selection(update, context):
         page = int(page)
         if action in PREPARATION:
             text = preparation_text(snapshot, action, preferences)
-            pages = [text[i:i + 3800] for i in range(0, len(text), 3800)] or ["нет данных"]
+            pages = [text[i : i + 3800] for i in range(0, len(text), 3800)] or [
+                "нет данных"
+            ]
             if page >= len(pages):
                 raise ValueError("Страница подготовки не найдена.")
             text = pages[page]
-            markup = card_keyboard(snapshot, token, position, action, page, len(pages), preferences)
+            markup = card_keyboard(
+                snapshot, token, position, action, page, len(pages), preferences
+            )
             if action == "prepbriefing":
                 block = snapshot.blocks.get("briefing")
                 url = block.details.get("url") if block else None
@@ -620,8 +645,11 @@ def card_keyboard(
         rows = [
             [button("CREW / FDP", "prepcrew"), button("WX / TAF", "prepwx")],
             [button("NOTAM", "prepnotams"), button("Briefing", "prepbriefing")],
-            *([[button("DEP NOTAM", "nlD_A"), button("ARR NOTAM", "nlA_A")]]
-              if snapshot.blocks.get("briefing") else []),
+            *(
+                [[button("DEP NOTAM", "nlD_A"), button("ARR NOTAM", "nlA_A")]]
+                if snapshot.blocks.get("briefing")
+                else []
+            ),
             preference_buttons(token, preferences or {}, position=position),
             [button("← К рейсу", "card")],
         ]
@@ -629,15 +657,20 @@ def card_keyboard(
         rows = [
             [button("Подготовка", "prep"), button("REFRESH", "refresh")],
             preference_buttons(token, preferences or {}, position=position)
-            + [InlineKeyboardButton(
-                "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
-            )],
+            + [
+                InlineKeyboardButton(
+                    "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
+                )
+            ],
         ]
     if pages > 1:
-        rows.insert(0, [
-            *([button("←", action, page - 1)] if page else []),
-            *([button("→", action, page + 1)] if page + 1 < pages else []),
-        ])
+        rows.insert(
+            0,
+            [
+                *([button("←", action, page - 1)] if page else []),
+                *([button("→", action, page + 1)] if page + 1 < pages else []),
+            ],
+        )
     return InlineKeyboardMarkup(rows)
 
 
@@ -659,12 +692,17 @@ def preparation_text(snapshot, action, preferences=None):
         crew = snapshot.blocks.get("crew")
         duty = snapshot.blocks.get("duty")
         return (
-            heading + "\n\nCREW / FDP / DUTY / REST\n"
+            heading
+            + "\n\nCREW / FDP / DUTY / REST\n"
             + (crew.text if crew else "Экипаж: нет данных")
-            + "\n\n" + (duty.text if duty else "Duty / Rest: нет данных")
-            + "\n\nHOTEL: " + (
-                " | ".join(f"{item['position']}: {item['name']}"
-                         for item in crew.details.get("hotels", []))
+            + "\n\n"
+            + (duty.text if duty else "Duty / Rest: нет данных")
+            + "\n\nHOTEL: "
+            + (
+                " | ".join(
+                    f"{item['position']}: {item['name']}"
+                    for item in crew.details.get("hotels", [])
+                )
                 if crew and crew.details.get("hotels")
                 else "не указан в доступных данных Leon."
             )
@@ -684,17 +722,23 @@ def preparation_text(snapshot, action, preferences=None):
                 snapshot.blocks["weather"] = original
     if action == "prepnotams":
         block = snapshot.blocks.get("notams")
-        return heading + "\n\nNOTAM\n" + (
-            block.text if block else "Брифинг не загружен."
+        return (
+            heading + "\n\nNOTAM\n" + (block.text if block else "Брифинг не загружен.")
         )
     if action == "prepbriefing":
         block = snapshot.blocks.get("briefing")
         url = block.details.get("url") if block else None
-        return heading + "\n\nBRIEFING\n" + (
-            "ForeFlight: ссылка получена. Откройте её кнопкой ниже."
-            if url else "Ссылка на брифинг недоступна."
+        return (
+            heading
+            + "\n\nBRIEFING\n"
+            + (
+                "ForeFlight: ссылка получена. Откройте её кнопкой ниже."
+                if url
+                else "Ссылка на брифинг недоступна."
+            )
         )
     raise ValueError("Неизвестный раздел подготовки.")
+
 
 def card_detail(snapshot, action, preferences=None):
     if action in {"card", "refresh"}:
