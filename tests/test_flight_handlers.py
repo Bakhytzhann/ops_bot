@@ -1,5 +1,3 @@
-"""Flight-specific ground handler contacts must never be guessed from airport favourites."""
-
 from unittest.mock import AsyncMock
 
 import pytest

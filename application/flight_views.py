@@ -1,5 +1,3 @@
-"""Read models for SKED, Flight Card and Preparation."""
-
 import asyncio
 import logging
 import math
@@ -303,7 +301,7 @@ class FlightViews:
                 return _Read(
                     value, fetched, fresh_until=fetched + timedelta(seconds=ttl)
                 )
-            except Exception as exc:  # noqa: BLE001 -- upstream boundary
+            except Exception as exc:
                 logger.warning("%s unavailable (%s)", source, type(exc).__name__)
                 if stale and prior and prior[1].data is not None:
                     age = (now - prior[1].fetched_at).total_seconds()

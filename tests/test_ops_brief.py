@@ -1,5 +1,3 @@
-"""OPS BRIEF: scheduled location only and access-controlled station notes."""
-
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock

@@ -1,5 +1,3 @@
-"""Ground Status free-form input, source selection, UTC parsing and summaries."""
-
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -17,13 +15,8 @@ async def test_qwen_interval_is_validated_and_kept_in_utc(monkeypatch):
     from services import ai_analysis
 
     qwen = AsyncMock(
-        return_value=SimpleNamespace(
-            flight="",
-            kind="FUEL",
-            start="1310",
-            end="1345",
-            note="",
-            critical=False,
+        return_value=ground_input.GroundInput(
+            items=[ground_input.GroundParsedItem(kind="FUEL", start="1310", end="1345")]
         )
     )
     monkeypatch.setattr(ai_analysis, "request_analysis", qwen)
@@ -43,13 +36,12 @@ async def test_free_note_keeps_original_text(monkeypatch):
     from services import ai_analysis
 
     qwen = AsyncMock(
-        return_value=SimpleNamespace(
-            flight="",
-            kind="NOTE",
-            start="",
-            end="",
-            note="ТЗ поздно приехал из-за пробки",
-            critical=False,
+        return_value=ground_input.GroundInput(
+            items=[
+                ground_input.GroundParsedItem(
+                    kind="NOTE", note="ТЗ поздно приехал из-за пробки"
+                )
+            ]
         )
     )
     monkeypatch.setattr(ai_analysis, "request_analysis", qwen)
@@ -151,3 +143,52 @@ def test_model_cannot_invent_times_absent_from_operator_text():
     assert ground_input._time_in_input("13:10", "заправка 1310/1345")
     assert ground_input._time_in_input("1345Z", "заправка 1310/1345")
     assert not ground_input._time_in_input("12:45", "ТЗ приехал поздно")
+
+
+@pytest.mark.asyncio
+async def test_report_combines_now_relative_times_blocker_eta_and_station_note(
+    monkeypatch,
+):
+    from services import ai_analysis
+
+    now = datetime(2026, 11, 20, 15, 0, tzinfo=UTC)
+    item = ground_input.GroundParsedItem
+    qwen = AsyncMock(
+        return_value=ground_input.GroundInput(
+            items=[
+                item(kind="FUEL_STARTED", start="5 минут назад"),
+                item(kind="CABIN_READY"),
+                item(
+                    kind="BLOCKER_OPEN", process="pax", reason="ждём багаж", eta="+20m"
+                ),
+                item(kind="STATION_NOTE", note="На станции поменялся хэндлер"),
+            ]
+        )
+    )
+    monkeypatch.setattr(ai_analysis, "request_analysis", qwen)
+    text = "Заправка началась 5 минут назад, салон готов, ждём багаж +20m. На станции поменялся хэндлер"
+    _, reports = await ground_input.parse_ground_input(
+        text, (42, "turn"), now=now, station_notes=True
+    )
+    assert reports == [
+        ("FUEL_STARTED", now - timedelta(minutes=5), {}),
+        ("CABIN_READY", now, {}),
+        (
+            "BLOCKER_OPEN",
+            now,
+            {
+                "process": "pax",
+                "reason": "ждём багаж",
+                "expected_at": now + timedelta(minutes=20),
+            },
+        ),
+        (
+            "STATION_NOTE",
+            now,
+            {"text": "На станции поменялся хэндлер", "critical": False},
+        ),
+    ]
+    with pytest.raises(ValueError, match="Время не найдено"):
+        await ground_input.parse_ground_input(
+            text.replace("+20m", ""), (42, "turn"), now=now, station_notes=True
+        )

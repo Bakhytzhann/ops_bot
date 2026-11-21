@@ -1,5 +1,3 @@
-"""Translate a signed Telegram launch into access to the operational API."""
-
 import hmac
 import json
 import re

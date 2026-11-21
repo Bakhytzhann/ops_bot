@@ -1,5 +1,3 @@
-"""Concise, source-limited station history interpretation; run only on demand."""
-
 import hashlib
 import json
 
@@ -29,7 +27,6 @@ _RESULT_CACHE = {}
 
 
 async def interpret_station(report):
-    # Include a recent working window plus detected older serious reports.
     notes = [
         {"date": entry["date"], "text": entry["text"][:190]}
         for entry in report["notes"][-30:]

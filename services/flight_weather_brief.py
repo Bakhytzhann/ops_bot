@@ -1,5 +1,3 @@
-"""Conservative compact METAR facts for Flight Card, not an approach assessment."""
-
 import re
 
 from services.flight_weather import _phenomenon, grouped_reports, station_label
@@ -96,7 +94,6 @@ def concise_weather(snapshot, preferences=None):
         if not entries:
             lines.append(f"{label}: нет METAR")
         else:
-            # Do not present conflicting sources as one observation.
             raw = entries[0]["raw"]
             facts = metar_facts(raw)
             lines.append(

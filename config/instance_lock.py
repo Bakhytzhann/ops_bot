@@ -29,7 +29,7 @@ def windows_instance(name):
     if not handle:
         raise ctypes.WinError(error)
     try:
-        if error == 183:  # ERROR_ALREADY_EXISTS
+        if error == 183:
             raise InstanceAlreadyRunning(name)
         yield
     finally:

@@ -1,11 +1,3 @@
-"""Demonstration E35L charter quotation. Never an operational/commercial offer.
-
-Reference hourly market listings: business-jets.kz/price.html and
-arenda-samoleta.kz/price-list.html (retrieved November 2026).
-All airport, handling, navigation, permit and catering charges are illustrative
-scenario assumptions, NOT verified airport tariffs or flight-plan prices.
-"""
-
 import math
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -34,7 +26,6 @@ DEMO_ROUTES = (
     ("Дели", "VIDP", 28.56, 77.10, "international"),
     ("Урумчи", "ZWWW", 43.91, 87.47, "regional"),
 )
-# Two-airport ground/handling allowances per sector, both ends together.
 FEE_ALLOWANCE = {
     "domestic": 1400,
     "regional": 2100,
@@ -53,7 +44,6 @@ def haversine_km(a, b):
 
 
 def estimate(index, *, rate=6500, pax=8, reserve=10, return_flight=False):
-    """Transparent scenario amounts in USD; not a quotation from suppliers."""
     if not 0 <= index < len(DEMO_ROUTES):
         raise ValueError("Неизвестный маршрут.")
     if rate not in {5500, 6500, 7500}:
@@ -70,7 +60,7 @@ def estimate(index, *, rate=6500, pax=8, reserve=10, return_flight=False):
     navigation = round(assumed_km * 0.35 * sectors)
     permits = (0 if group == "domestic" else 500) * sectors
     catering = 85 * pax * sectors
-    handling_overnight = 0  # Explicitly excluded until itinerary/parking is known.
+    handling_overnight = 0
     subtotal = flight + airport + navigation + permits + catering
     reserve_amount = round(subtotal * reserve / 100)
     total = math.ceil((subtotal + reserve_amount) / 100) * 100

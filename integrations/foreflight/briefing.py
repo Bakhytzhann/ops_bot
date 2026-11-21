@@ -1,5 +1,3 @@
-"""Bounded PDF download without forwarding Dispatch credentials or following redirects."""
-
 import asyncio
 import ipaddress
 import socket

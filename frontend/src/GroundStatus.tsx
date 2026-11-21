@@ -1,32 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ApiError, type OpsApi, type Selection } from './api'
+import { useMemo, useState } from 'react'
+import type { OpsApi, Selection } from './api'
 import { Button } from './components/ui'
 import { Empty, Facts, ToolPanel, ToolRow, ToolTabs } from './OpsCommon'
-import type { GroundDetail, GroundEntry, Process, Turn } from './ops-types'
+import type { GroundDetail, Turn } from './ops-types'
+import { eventLabels, GroundTurnControls } from './GroundTurnControls'
 import { Resource, utcStamp, utcTime } from './presentation'
 
 const lanes = [['active', 'Active'], ['recent', 'Recent'], ['clarify', 'Verify']] as const
-const processes: [Process, string][] = [
-  ['fuel', 'Fuel'], ['handling', 'Handling'], ['cabin', 'Cabin'],
-  ['pax', 'Passengers'], ['documents', 'Documents'], ['other', 'Other'],
-]
-const events: Record<string, string> = {
-  IN_BLOCK: 'In-block', OUT_BLOCK: 'Off-block', LANDING: 'Landing', TAKEOFF: 'Takeoff', STAND: 'Stand',
-  CHOCKS_ON: 'Chocks on', CHOCKS_OFF: 'Chocks off',
-  PAX_OFF_STARTED: 'Deplaning started', PAX_OFF_COMPLETED: 'Deplaning complete',
-  FUEL_REQUESTED: 'Fuel requested', FUEL_TRUCK_ARRIVED: 'Fuel truck arrived',
-  FUEL_STARTED: 'Fuel started', FUEL_COMPLETED: 'Fuel complete',
-  CABIN_READY: 'Cabin ready', HANDLING_READY: 'Handling ready', DOCUMENTS_READY: 'Documents ready',
-  BOARDING_STARTED: 'Boarding started', BOARDING_COMPLETED: 'Boarding complete',
-  PAX_ON_BOARD: 'Passengers on board', REPORTED_READY: 'Reported ready',
-  BLOCKER_OPEN: 'Open blocker', BLOCKER_CLOSE: 'Close blocker', TARGET: 'Set UTC target', NOTE: 'Station note',
-}
-
 function TurnRow({ turn, onTurn, prefix = '' }: { turn: Turn; onTurn: (turn: Turn) => void; prefix?: string }) {
   const flight = [turn.inbound_number, turn.outbound_number].filter(Boolean).join(' → ')
+  const blockers = turn.blockers?.length ?? 0
   return <ToolRow title={prefix + [turn.station, turn.registration].filter(Boolean).join(' · ')}
     detail={[flight, utcTime(turn.planned_in) + ' / ' + utcTime(turn.planned_out)].filter(Boolean).join(' · ')}
-    action={turn.status.toUpperCase()} onClick={() => onTurn(turn)} />
+    action={blockers ? blockers + ' BLOCKER' + (blockers === 1 ? '' : 'S') : turn.status.toUpperCase()} onClick={() => onTurn(turn)} />
 }
 
 export function GroundStatus({ api, selection, onTurn }: {
@@ -64,71 +50,6 @@ export function GroundStatus({ api, selection, onTurn }: {
   )
 }
 
-function inputTime(value: FormDataEntryValue | null) {
-  return typeof value === 'string' && value ? new Date(value + 'Z').toISOString() : undefined
-}
-
-function EventForm({ turn, api, onSaved }: { turn: Turn; api: OpsApi; onSaved: (detail: GroundDetail) => void }) {
-  const [kind, setKind] = useState('IN_BLOCK')
-  const [message, setMessage] = useState('')
-  const [saving, setSaving] = useState(false)
-  const request = useRef<AbortController | null>(null)
-  const retry = useRef<{ fingerprint: string; id: string } | null>(null)
-  const processRequired = kind === 'BLOCKER_OPEN' || kind === 'BLOCKER_CLOSE'
-  const textRequired = kind === 'NOTE' || kind === 'STAND' || kind === 'BLOCKER_OPEN'
-  useEffect(() => () => request.current?.abort(), [])
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (request.current) return
-    const form = new FormData(event.currentTarget)
-    const entry = {
-      kind, event_at: inputTime(form.get('event_at')),
-      target_at: inputTime(form.get('target_at')), expected_at: inputTime(form.get('expected_at')),
-      process: (form.get('process') || undefined) as Process | undefined,
-      text: String(form.get('text') ?? '').trim(), critical: form.get('critical') === 'on',
-    }
-    const fingerprint = JSON.stringify(entry)
-    if (retry.current?.fingerprint !== fingerprint) retry.current = { fingerprint, id: crypto.randomUUID() }
-    const payload: GroundEntry = { ...entry, request_id: retry.current.id }
-    const controller = new AbortController()
-    request.current = controller
-    setSaving(true)
-    setMessage('')
-    try {
-      onSaved(await api.recordGround(turn.key, payload, controller.signal))
-      if (controller.signal.aborted) return
-      retry.current = null
-      setMessage('Event recorded.')
-    } catch (error) {
-      if (!controller.signal.aborted) setMessage(error instanceof ApiError ? error.message : 'Connection unavailable. Retry this event.')
-    } finally {
-      request.current = null
-      if (!controller.signal.aborted) setSaving(false)
-    }
-  }
-
-  return (
-    <form className="tool-form" onSubmit={submit}>
-      <label>Event<select aria-label="Event" value={kind} onChange={(event) => { setKind(event.target.value); setMessage('') }}>
-        {Object.entries(events).filter(([key]) => turn.outbound_id || !['OUT_BLOCK', 'TARGET'].includes(key))
-          .map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-      </select></label>
-      <label>Event time UTC <span className="minor">Default now</span><input name="event_at" type="datetime-local" /></label>
-      {processRequired && <label>Process<select required name="process">
-        {processes.map(([value, text]) => <option value={value} key={value}>{text}</option>)}
-      </select></label>}
-      {kind === 'TARGET' && <label>Target UTC<input name="target_at" type="datetime-local" required /></label>}
-      {kind === 'BLOCKER_OPEN' && <label>Expected clear UTC<input name="expected_at" type="datetime-local" /></label>}
-      {(textRequired || kind === 'BLOCKER_OPEN') &&
-        <label>{kind === 'STAND' ? 'Stand' : 'Details'}<textarea name="text" maxLength={kind === 'BLOCKER_OPEN' ? 160 : 500} required={textRequired} /></label>}
-      {kind === 'NOTE' && <label className="checkbox-label"><input name="critical" type="checkbox" /> Safety-critical observation</label>}
-      <Button type="submit" disabled={saving}>{saving ? 'Recording…' : 'Record event'}</Button>
-      {message && <p className="minor" role="status">{message}</p>}
-    </form>
-  )
-}
-
 function CurrentTurn({ original, api, onStation, onFlight }: {
   original: GroundDetail; api: OpsApi; onStation: (code: string) => void; onFlight: () => void
 }) {
@@ -139,6 +60,8 @@ function CurrentTurn({ original, api, onStation, onFlight }: {
   const loadHistory = useMemo(() => api.groundHistory(turn.key), [api, turn.key])
   return (
     <>
+      <GroundTurnControls data={data} api={api} onSaved={(detail) => setUpdated({ base: original, detail })} />
+      <details className="tool-disclosure"><summary>Timing &amp; forecast</summary>
       <Facts entries={[
         ['IN plan', utcTime(timing.baseline_in)], ['OUT plan', utcTime(timing.baseline_out)],
         ['Reported IN', utcTime(timing.in)], ['Reported OUT', utcTime(timing.out)],
@@ -149,26 +72,18 @@ function CurrentTurn({ original, api, onStation, onFlight }: {
         ['IN vs plan', timing.inbound_delta_minutes === null ? null : timing.inbound_delta_minutes + ' min'],
         ['OUT vs plan', timing.departure_delta_minutes === null ? null : timing.departure_delta_minutes + ' min'],
       ]} />
-      {(timing.unknown_blockers || timing.blockers.length > 0) && <div className="tool-section">
-        <h3 className="caption">Open blockers</h3>
-        {timing.blockers.map((item) => <p className="tool-line" key={item.process}>
-          {processes.find(([value]) => value === item.process)?.[1]} · {item.expected_at ? 'ETA ' + utcTime(item.expected_at) : 'ETA unreported'}{item.reason && ' · ' + item.reason}
-        </p>)}
-      </div>}
       {Object.entries(timing.movement_conflicts).map(([label, time]) =>
         <p className="tool-line text-amber-300" key={label}>{label} conflict · OPS {utcTime(time)} · Leon retained</p>)}
+      </details>
       <div className="tool-tabs px-3 pb-3">
         <Button variant="outline" onClick={() => onStation(turn.station)}>Station statistics</Button>
         <Button variant="outline" onClick={onFlight}>SKED</Button>
       </div>
-      <details className="tool-disclosure" open><summary>Record ground event</summary>
-        <EventForm turn={turn} api={api} onSaved={(detail) => setUpdated({ base: original, detail })} />
-      </details>
       <details className="tool-disclosure" open><summary>Timeline · {data.events.length}</summary>
         {data.events.length ? <ol className="tool-lines">
           {[...data.events].reverse().map((row) => (
             <li className="tool-line" key={row.id}>
-              <strong>{events[row.kind] ?? row.kind}</strong>
+              <strong>{eventLabels[row.kind] ?? row.kind}</strong>
               <span className="minor"> · {utcStamp(row.event_at)} · {row.source === 'leon' ? 'Leon' : 'OPS'}</span>
               {(row.detail.text || row.detail.reason || row.detail.stand || row.detail.target_at || row.detail.process) && <p className="mt-1 break-words">
                 {[row.detail.process, row.detail.text, row.detail.reason, row.detail.stand, row.detail.target_at && utcStamp(row.detail.target_at)].filter(Boolean).join(' · ')}

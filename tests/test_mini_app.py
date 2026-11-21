@@ -214,7 +214,10 @@ def sources(monkeypatch):
     return schedule, plan, crew, weather, briefing
 
 
-def test_telegram_access_rejects_unverified_expired_group_and_revoked_launches(sources):
+def test_telegram_access_rejects_unverified_expired_group_and_revoked_launches(
+    sources, monkeypatch
+):
+    monkeypatch.setattr(settings, "telegram_admin_ids", "7")
     schedule, *_ = sources
     path = f"{BASE}/schedule?day={DAY}"
     invalid = signed_headers()
@@ -240,7 +243,8 @@ def test_telegram_access_rejects_unverified_expired_group_and_revoked_launches(s
         schedule.assert_not_called()
 
         assert client.get(path, headers=signed_headers()).status_code == 200
-        assert access_store.revoke_from_desktop(42)
+        revision = access_store.get(42)["revision"]
+        access_store.decide(7, 42, "revoke", revision)
         assert client.get(path, headers=signed_headers()).status_code == 403
         schedule.assert_awaited_once()
 

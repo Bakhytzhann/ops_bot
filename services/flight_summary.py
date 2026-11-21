@@ -1,5 +1,3 @@
-"""Compact Flight Card from source fields; detailed bulletins remain unchanged."""
-
 import json
 import re
 from pathlib import Path

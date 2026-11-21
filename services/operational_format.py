@@ -1,5 +1,3 @@
-"""Deterministic presentation; never ask the LLM to alter retrieved facts."""
-
 from services.weather_reports import format_awc_weather, format_leon_weather
 
 __all__ = [
@@ -50,13 +48,11 @@ def format_watch(result):
 
 
 def _display(value, indent=0):
-    """Readable bounded tree for roster fields whose shape can vary by duty type."""
     if value is None:
         return "—"
     if isinstance(value, list):
         return "\n".join(_display(v, indent) for v in value) or "Нет записей."
     if isinstance(value, dict):
-        # Identity/contact/travel document fields are never emitted by this renderer.
         allowed = {
             "startTime",
             "endTime",

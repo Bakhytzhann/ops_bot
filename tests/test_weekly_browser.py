@@ -267,7 +267,6 @@ def test_home_keyboard_persists():
 async def test_start_shows_compact_default_keyboard(context):
     u = update(text="/start@OPS_bot")
     await bot.handle_message(u, context)
-    # The keyboard is installed by screen_message_handler, not this direct handler.
     u.effective_message.reply_text.assert_not_awaited()
 
 

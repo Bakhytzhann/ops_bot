@@ -1,5 +1,3 @@
-"""Fast ForeFlight API fields for Flight Card; never fetches briefing documents."""
-
 import asyncio
 
 from services.foreflight_operations import (

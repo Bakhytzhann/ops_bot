@@ -1,5 +1,3 @@
-"""Compact raw-weather presentation, with deduplicated source attribution."""
-
 import re
 from datetime import UTC, datetime, timedelta
 

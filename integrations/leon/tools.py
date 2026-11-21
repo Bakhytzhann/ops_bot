@@ -32,7 +32,6 @@ JOURNEY_FIELDS = (
 
 
 def parse_result(result):
-    """Convert MCP content into Python data."""
     if result.structured_content is not None:
         return result.structured_content
 
@@ -53,7 +52,6 @@ def parse_result(result):
 
 
 def compact(data, max_chars=12000):
-    """Limit data sent back to the local LLM."""
     serialized = json.dumps(
         data,
         ensure_ascii=False,
@@ -135,7 +133,6 @@ async def get_flight_schedule(
     complete = False
     offset = 0
 
-    # Maximum 10 pages / 500 flights per request.
     for _page in range(10):
         arguments = make_flight_search_arguments(
             start,
@@ -272,7 +269,6 @@ def _attach_journey_log(flight: dict, source: dict) -> None:
 
 
 async def get_flight_history(start_date: str, end_date: str) -> dict:
-    """Join Journey Log facts to the scheduled legs returned by Leon."""
     schedule = await get_flight_schedule(
         start_date, end_date, _include_journey_logs=True
     )

@@ -1,5 +1,3 @@
-"""Persist and summarize reported post-flight data from Leon Journey Log."""
-
 import asyncio
 import re
 import sqlite3
@@ -539,7 +537,6 @@ async def refresh_journey_history(start, end):
 
 
 async def load_journey_insights(start, end, *, refresh=False):
-    """Fill uncovered days from Leon and return any usable local history."""
     _completed_period(start, end, MAX_HISTORY_DAYS)
     covered = (
         ()

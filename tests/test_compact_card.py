@@ -1,5 +1,3 @@
-"""Compact UI and Leon seconds/reporting regressions using verified response shapes."""
-
 from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock

@@ -31,8 +31,8 @@ export function telegramLaunch() {
       bridge.ready()
       bridge.expand()
       if (bridge.isVersionAtLeast?.('6.9')) {
-        bridge.setHeaderColor?.('#0b131d')
-        bridge.setBackgroundColor?.('#0b131d')
+        bridge.setHeaderColor?.('#090c10')
+        bridge.setBackgroundColor?.('#090c10')
       }
     },
     openLink: (url: string) => bridge.openLink(url),

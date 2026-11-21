@@ -1,6 +1,3 @@
-"""Display assigned crew names/positions without contact or document data."""
-
-
 def crew_identity(member):
     contact = member.get("contact") or {}
     name = (

@@ -1,5 +1,3 @@
-"""Session display preferences. Never infer local time or rewrite source bulletins."""
-
 from datetime import datetime
 
 from services.snapshot_models import utc

@@ -1,5 +1,3 @@
-"""Extract standard ICAO NOTAM records from ForeFlight briefing airport sections."""
-
 import re
 from datetime import UTC, datetime
 
@@ -23,7 +21,6 @@ def notam_time(value):
 
 
 def extract_notams(text, stations):
-    """Return only DEP/ARR section records; empty extraction is not a clean status."""
     text = re.sub(r"(?m)^NOTAMs\s+\d+\s+of\s+\d+\s*$", "", text)
     marker = re.search(r"(?mi)^NOTAMS\s*$", text)
     if not marker:
@@ -48,7 +45,6 @@ def extract_notams(text, stations):
         for j, header in enumerate(headers):
             end = headers[j + 1].start() if j + 1 < len(headers) else len(body)
             raw = body[header.start() : end].strip()
-            # A following record's human-readable title precedes its ICAO header.
             if j + 1 < len(headers):
                 lines = raw.splitlines()
                 if lines and lines[-1].startswith("["):
@@ -60,7 +56,6 @@ def extract_notams(text, stations):
                 m[1]: m[2].strip()
                 for m in re.finditer(r"([A-GQ])\)\s*(.*?)(?=\s+[A-GQ]\)|\Z)", raw, re.S)
             }
-            # Do not attribute a different aerodrome's record to DEP/ARR.
             if not re.search(rf"\b{re.escape(station)}\b", fields.get("A", "")):
                 continue
             before = body[: header.start()].strip().splitlines()
@@ -89,7 +84,6 @@ def extract_notams(text, stations):
 
 
 def applicability(records, start, end):
-    """Keep unknown schedules explicit; supersession only when effective at interval start."""
     replaced = {
         n.replaces
         for n in records

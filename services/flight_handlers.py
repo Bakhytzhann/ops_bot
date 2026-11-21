@@ -1,5 +1,3 @@
-"""Resolve only flight-assigned Leon handlers; enrich contacts from Airport Directory."""
-
 import asyncio
 import re
 
@@ -20,7 +18,6 @@ def _text(value):
 
 
 def _assigned(row, role):
-    """An airport favourite is NOT proof of a flight assignment."""
     suffix = "Adep" if role == "departure" else "Ades"
     keys = (
         ("handlingAdep", "adepHandler", "departureHandler", "handlerAdep")
@@ -45,7 +42,6 @@ def _assigned(row, role):
                     }
         elif isinstance(value, str) and value.strip():
             return {"name": value.strip(), "handlerNid": None}
-    # Field names used by some Leon exports/report projections.
     for key in (f"handlerName{suffix}", f"{role}HandlerName"):
         name = _text(row.get(key))
         if name:

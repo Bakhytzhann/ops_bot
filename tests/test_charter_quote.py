@@ -1,5 +1,3 @@
-"""Demo charter quote math and menu controls; no live tariff claims."""
-
 import pytest
 
 from bot.charter_quote import DEMO_ROUTES, estimate, menu, quote_view

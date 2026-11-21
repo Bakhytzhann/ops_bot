@@ -1,5 +1,3 @@
-"""Station roles and source-faithful weather for DEP, ARR and unique alternates."""
-
 import asyncio
 import re
 
@@ -169,7 +167,6 @@ def full_weather(snapshot, preferences=None):
                     product
                     + (" · " + " / ".join(entry["sources"]) if shared is None else "")
                 )
-                # Raw METAR carries observation time, raw TAF carries issue/validity.
                 raw = entry["raw"]
                 if entry.get("metadata") and (
                     not metar_stamp(raw)

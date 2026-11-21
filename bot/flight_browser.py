@@ -1,5 +1,3 @@
-"""Shared SKED sessions and Flight Cards scoped to the originating chat/topic."""
-
 import re
 from datetime import UTC, datetime, timedelta
 from secrets import token_hex
@@ -96,7 +94,6 @@ def schedule_heading(start, end):
 
 
 def render_page(token, listing, page=0):
-    """A numbered, copyable seven-day SKED, not one inline button per flight."""
     flights = listing["flights"]
     preferences = listing.get("preferences", {})
     pages = max(1, (len(flights) + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -153,7 +150,6 @@ def render_page(token, listing, page=0):
 
 
 def selected_schedule(context, update):
-    """Only a listing in this exact chat/topic may receive numeric selection."""
     scope = _scope(update)
     token = (context.user_data.get("active_sked") or {}).get(scope)
     listing = _cache(context).get(token)
@@ -171,7 +167,6 @@ def accepts_sked_number(update, context):
 
 
 async def select_sked_number(update, context):
-    """Reuse exact callback card path for a typed schedule row."""
     from types import SimpleNamespace
 
     require_user(update)
@@ -187,8 +182,6 @@ async def select_sked_number(update, context):
         answer=lambda **kwargs: None,
         edit_message_text=update.effective_message.reply_text,
     )
-    # Numeric messages use the normal screen transport, while the existing
-    # callback-based card selection remains the single source of card logic.
     proxy = SimpleNamespace(
         callback_query=callback,
         effective_user=update.effective_user,
@@ -202,7 +195,6 @@ async def select_sked_number(update, context):
         "screen_generation", 0
     ):
         return
-    # Never remove a numeric input until the selected card has been displayed.
     bot = getattr(context, "bot", None)
     if bot is not None and getattr(update.effective_message, "message_id", None):
         from contextlib import suppress
@@ -241,7 +233,7 @@ async def show_week(
         result = await get_flight_schedule(today.isoformat(), end.isoformat())
     except PermissionError:
         raise
-    except Exception:  # noqa: BLE001 -- failed source is distinct from an empty schedule
+    except Exception:
         result = {"flights": [], "complete": False}
     valid = [
         f
@@ -415,8 +407,6 @@ async def handle_selection(update, context):
         snapshots = listing.setdefault("snapshots", {})
         snapshot = snapshots.get(position)
         if kind == "fl" or snapshot is None or action == "refresh":
-            # Render known schedule data before any slow API calls. In the
-            # single-message UI this edits the same screen immediately.
             basic = listing["flights"][position]
             await edit_message_text(
                 query,
@@ -518,7 +508,7 @@ async def handle_selection(update, context):
             )
             try:
                 snapshot.blocks.update(await load_foreflight(snapshot.flight))
-            except Exception:  # noqa: BLE001 -- optional external source boundary
+            except Exception:
                 snapshot.blocks["notams"] = SourceBlock(
                     "ForeFlight", "Брифинг/NOTAM сейчас недоступны."
                 )
@@ -543,7 +533,7 @@ async def handle_selection(update, context):
                     "ready",
                     details={"reports": list(result.get("reports", []))},
                 )
-            except Exception:  # noqa: BLE001 -- optional external source boundary
+            except Exception:
                 snapshot.blocks["weather_taf"] = SourceBlock(
                     "Leon / AWC", "TAF: источник недоступен."
                 )
@@ -586,7 +576,6 @@ async def handle_selection(update, context):
             markup = card_keyboard(
                 snapshot, token, position, action, page, len(pages), preferences
             )
-        # Telegram rejects identical edits; avoid unnecessary errors on repeated taps.
         if (
             getattr(update.effective_message, "text", None) != text
             or getattr(update.effective_message, "reply_markup", None) != markup

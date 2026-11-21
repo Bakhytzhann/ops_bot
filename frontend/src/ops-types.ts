@@ -3,6 +3,7 @@ import type { SourceState } from './api'
 export type LegRef = {
   id: number | null; number: string | null; departure: string | null; arrival: string | null
   std: string | null; sta: string | null
+  ferry?: boolean
 }
 
 export type FleetAircraft = {
@@ -21,15 +22,27 @@ export type Turn = {
   inbound_id: number | null; outbound_id: number | null
   inbound_number: string | null; outbound_number: string | null
   planned_in: string | null; planned_out: string | null
+  outbound_arrival?: string | null
+  blockers?: Blocker[]
+  ready_at?: string | null
+}
+
+export function turnForFlight(turns: Turn[] | undefined, flightId: number) {
+  return turns?.find((turn) => turn.outbound_id === flightId) ??
+    turns?.find((turn) => turn.inbound_id === flightId)
 }
 
 export type GroundList = SourceState & { cards: Turn[] }
 export type Process = 'fuel' | 'handling' | 'cabin' | 'pax' | 'documents' | 'other'
 
-export type GroundEntry = {
-  request_id: string; kind: string; event_at?: string; target_at?: string
-  expected_at?: string; process?: Process; text?: string; critical?: boolean
+export type GroundEvent = {
+  kind: string; event_at?: string | null; target_at?: string | null
+  expected_at?: string | null; process?: Process | null; text?: string; critical?: boolean
 }
+export type GroundEntry = GroundEvent & { request_id: string }
+export type GroundReport = { request_id: string; items: GroundEvent[] }
+export type GroundPreview = GroundReport & { station_notes_allowed: boolean }
+export type Blocker = { process: Process; reason?: string; expected_at?: string | null; opened_at: string }
 
 export type GroundDetail = SourceState & {
   turn: Turn
@@ -42,7 +55,7 @@ export type GroundDetail = SourceState & {
     ready_not_before: string | null; unknown_blockers: boolean; risk_minutes: number | null
     inbound_delta_minutes: number | null; departure_delta_minutes: number | null
     station_delta_minutes: number | null; after_ready_minutes: number | null
-    blockers: { process: Process; reason?: string; expected_at: string | null; opened_at: string }[]
+    blockers: Blocker[]
     movement_conflicts: Record<string, string>
   }
 }

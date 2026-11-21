@@ -1,10 +1,7 @@
-"""Shared Telegram request identity and private-chat authorization."""
-
 from contextvars import ContextVar
 
 from config.settings import settings
 
-# The active Telegram user for this request.
 current_user_id: ContextVar[int | None] = ContextVar(
     "leon_user_id",
     default=None,

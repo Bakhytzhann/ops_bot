@@ -24,12 +24,8 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Application
-    app_name: str = "OPS Bot"
-    app_env: str = "development"
     debug: bool = False
 
-    # Ollama / Qwen3
     ollama_host: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
     ollama_temperature: float = Field(default=0.3, ge=0, le=2)
@@ -38,7 +34,6 @@ class Settings(BaseSettings):
     ollama_max_parallel: int = Field(default=1, ge=1, le=4)
     telegram_max_parallel: int = Field(default=4, ge=1, le=16)
 
-    # Telegram
     telegram_bot_token: SecretStr | None = None
     telegram_mini_app_url: str = ""
     telegram_allowed_user_ids: str = ""
@@ -46,23 +41,18 @@ class Settings(BaseSettings):
     charter_sales_user_ids: str = ""
     telegram_bot_username: str = "OPS_bot"
 
-    # Leon Software API
     leon_api_key: SecretStr | None = None
 
-    # Leon MCP
     leon_operator: str = ""
     leon_mcp_url: str = ""
 
-    # ForeFlight
     foreflight_api_key: SecretStr | None = None
     foreflight_vendor_id: SecretStr | None = None
     foreflight_api_url: str = ""
 
-    # Storage
     database_path: Path = Path("data/agent.db")
     log_dir: Path = Path("logs")
 
-    # Network
     api_timeout: float = Field(default=30.0, gt=0)
     snapshot_timeout: float = Field(default=45.0, gt=0)
     snapshot_schedule_ttl: float = Field(default=30, ge=0)
@@ -77,6 +67,19 @@ class Settings(BaseSettings):
             root = project_directory()
             values["_env_file"] = (root / ".env.local", root / ".env")
         super().__init__(**values)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        if (env_settings.env_vars.get("debug") or "").casefold() == "release":
+            env_settings.env_vars.pop("debug")
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     @field_validator("database_path", "log_dir")
     @classmethod

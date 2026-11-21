@@ -1,9 +1,3 @@
-"""Source-backed operational analytics over Leon schedule, not actual flight logs.
-
-Every financial/OTP item without a verified source is intentionally unavailable.
-Multi-month intervals use <=31-day Leon windows and disclose partial coverage.
-"""
-
 import asyncio
 import calendar
 from collections import Counter, defaultdict
@@ -26,8 +20,8 @@ VIEWS = {
     "finance": "Финансы",
     "timings": "Тайминги",
 }
-TIGHT_TURN_MINUTES = 120  # Descriptive dashboard threshold, not a legal minimum.
-IDLE_MINUTES = 24 * 60  # Long between-flight schedule gap, not verified downtime.
+TIGHT_TURN_MINUTES = 120
+IDLE_MINUTES = 24 * 60
 LONG_IDLE_MINUTES = 72 * 60
 
 
@@ -45,7 +39,6 @@ def period_start(key, today):
 
 
 def month_windows(start, end):
-    """Cover every calendar day once, respecting SKED's 31-day API limit."""
     if start > end:
         raise ValueError("Некорректный период.")
     cursor = start
@@ -68,7 +61,6 @@ def _sorted_counts(counter, count=5):
 
 
 def aggregate(flights, now):
-    """Aggregate scheduled fields only, never infer actual departure/arrival."""
     seen = set()
     valid = []
     cancelled = 0
@@ -249,7 +241,6 @@ def aggregate(flights, now):
 
 
 async def load_analytics(period, *, now=None, loader=None):
-    """Attempt all 31-day windows; never turn a failed window into zero flights."""
     if period not in PERIODS:
         raise ValueError("Неизвестный аналитический период.")
     now = now or datetime.now(UTC)
@@ -271,12 +262,9 @@ async def load_analytics(period, *, now=None, loader=None):
                     result.get("flights"), list
                 ):
                     raise TypeError("Неправильный ответ Leon")
-            except Exception:  # noqa: BLE001 -- failed source window stays explicitly partial
+            except Exception:
                 return None
 
-            # Search returns a reliable ferry=True filtered subset, while the
-            # default normalized flight record may not include an empty flag.
-            # Do not call this additional endpoint for injected test sources.
             flights = [dict(f) if isinstance(f, dict) else f for f in result["flights"]]
             result = {**result, "flights": flights}
             missing = [
@@ -301,7 +289,7 @@ async def load_analytics(period, *, now=None, loader=None):
                         for flight in missing:
                             if flight.get("flightNid") is not None:
                                 flight["ferry"] = flight["flightNid"] in ids
-                except Exception:  # noqa: BLE001 -- preserve unknown classification
+                except Exception:
                     pass
             return result
 

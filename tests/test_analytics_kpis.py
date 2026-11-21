@@ -1,5 +1,3 @@
-"""Management, commercial, finance and timing KPIs for real flight categories."""
-
 from datetime import UTC, datetime
 
 from services.analytics_report import aggregate, render_analytics

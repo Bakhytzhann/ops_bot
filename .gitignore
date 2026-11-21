@@ -44,8 +44,5 @@ Thumbs.db
 credentials.json
 secrets/
 
-# Legacy local documentation and temporary artifacts
-README.md
-docs/
 *.tmp
 *.bak

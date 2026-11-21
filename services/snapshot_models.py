@@ -1,5 +1,3 @@
-"""Source-backed operational snapshot; missing fields stay missing."""
-
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 

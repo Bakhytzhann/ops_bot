@@ -1,5 +1,3 @@
-"""Read-only Leon movement data and station cards for Ground Status."""
-
 import asyncio
 import re
 from collections import defaultdict
@@ -194,6 +192,7 @@ def _card(inbound, outbound, watches, now):
         "outbound_id": outbound.get("id"),
         "inbound_number": inbound.get("number"),
         "outbound_number": outbound.get("number"),
+        "outbound_arrival": outbound.get("arrival"),
         "planned_in": inbound.get("planned_in"),
         "planned_out": outbound.get("planned_out"),
         "estimated_in": None,
@@ -285,7 +284,6 @@ def effective_ground_status(turn, local_out, now):
 
 
 async def load_ground_flights(*, now=None, refresh=False):
-    """Return active lane, recent movements and stale confirmed arrivals."""
     now = now or datetime.now(UTC)
     if now.utcoffset() is None:
         raise ValueError("Ground Status requires aware UTC times")
@@ -296,8 +294,6 @@ async def load_ground_flights(*, now=None, refresh=False):
     async def load():
         data = await get_flight_schedule(start, end)
         legs, schedule_complete = _legs(data)
-        # Ground Status deliberately uses Leon schedule/flight identity only.
-        # Live Flight Watch is not queried; all actual milestones are manual.
         return legs, {}, schedule_complete, True, datetime.now(UTC)
 
     legs, watch, schedule_complete, watch_complete, fetched_at = await cache.get(

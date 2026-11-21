@@ -1,5 +1,3 @@
-"""Transient single-screen navigation and callback behavior."""
-
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -151,7 +149,6 @@ async def test_schedule_keeps_previous_context_until_data_arrives(
     before = ctx.bot.edit_message_text.await_count
 
     async def schedule(*args):
-        # Old data is still visible; a separate processing message was sent.
         assert ctx.bot.edit_message_text.await_count == before
         assert (
             ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"

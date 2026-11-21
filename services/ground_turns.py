@@ -1,5 +1,3 @@
-"""Shared turnaround event log and statistics of recorded ground milestones."""
-
 import json
 import re
 import sqlite3
@@ -10,6 +8,7 @@ from math import ceil
 from statistics import mean, median
 
 from config.settings import settings
+from services.station_notes import notes
 
 KINDS = frozenset(
     {
@@ -40,6 +39,8 @@ KINDS = frozenset(
     }
 )
 PROCESSES = frozenset({"fuel", "handling", "cabin", "pax", "documents", "other"})
+STATION_NOTE = "STATION_NOTE"
+MAX_REPORT_ITEMS = 16
 FUEL_DURATION = ("FUEL_STARTED", "FUEL_COMPLETED")
 FUEL_WAIT = ("FUEL_REQUESTED", "FUEL_TRUCK_ARRIVED")
 GROUND_DURATION = ("IN_BLOCK", "OUT_BLOCK")
@@ -72,6 +73,11 @@ SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS ground_turn_events_timeline
         ON ground_turn_events(turn_key, event_at, id);
+    CREATE TABLE IF NOT EXISTS ground_turn_reports (
+        turn_key TEXT NOT NULL REFERENCES ground_turn_sessions(turn_key),
+        request_id TEXT NOT NULL,
+        PRIMARY KEY(turn_key, request_id)
+    );
     CREATE INDEX IF NOT EXISTS ground_turn_events_kind
         ON ground_turn_events(turn_key, kind);
 """
@@ -210,8 +216,6 @@ class GroundTurnStore:
         now = _timestamp(datetime.now(UTC))
         with self._connect() as conn:
             self._observe(conn, metadata, now)
-            # Leon supplies flight identity and schedule only. Operational facts
-            # must be explicitly entered by an operator.
 
     def baseline(self, turn_key):
         with self._connect() as conn:
@@ -268,51 +272,111 @@ class GroundTurnStore:
             )
             return bool(inserted.rowcount)
 
-    def record_many(self, turn, entries, *, actor_id, request_id):
-        """Commit all steps of an operator input as one transaction."""
+    def record_many(self, turn, entries, *, actor_id, request_id, source="telegram"):
         if type(actor_id) is not int or not 0 < actor_id < 2**63:
             raise ValueError("Неверный автор наземного события.")
         base = _identifier(request_id, r"[A-Za-z0-9:_-]{1,140}")
-        if not 1 <= len(entries) <= 4:
+        source = _identifier(source, r"[a-z][a-z0-9_-]{0,31}")
+        if not 1 <= len(entries) <= MAX_REPORT_ITEMS:
             raise ValueError(
-                "В одной вводной допускается от одного до четырёх событий."
+                f"В одной вводной допускается от одного до {MAX_REPORT_ITEMS} событий."
             )
         metadata = _metadata(turn)
-        prepared = []
+        prepared, station_entries = [], []
         for index, (kind, event_at, detail) in enumerate(entries):
-            if kind not in KINDS:
-                raise ValueError("Неизвестный этап наземного обслуживания.")
-            prepared.append(
-                (
-                    kind,
-                    _timestamp(event_at),
-                    _event_detail(kind, detail),
-                    f"{base}:{index}",
+            unique_id = f"{base}:{index}"
+            if kind == STATION_NOTE:
+                station_entries.append(
+                    (_timestamp(event_at), detail, f"{metadata[0]}:{unique_id}")
                 )
-            )
+            elif kind in KINDS:
+                prepared.append(
+                    (kind, _timestamp(event_at), _event_detail(kind, detail), unique_id)
+                )
+            else:
+                raise ValueError("Неизвестный этап наземного обслуживания.")
         recorded_at = _timestamp(datetime.now(UTC))
-        count = 0
         with self._connect() as conn:
+            if station_entries:
+                notes.ensure_schema(conn)
             self._observe(conn, metadata, recorded_at)
-            for kind, event_at, detail, unique_id in prepared:
-                result = conn.execute(
-                    """INSERT INTO ground_turn_events
-                         (turn_key,kind,event_at,actor_id,recorded_at,source,
-                          request_id,detail)
-                       VALUES (?,?,?,?,?,'telegram',?,?)
-                       ON CONFLICT(turn_key,request_id) DO NOTHING""",
+            if source == "miniapp":
+                report = conn.execute(
+                    "INSERT OR IGNORE INTO ground_turn_reports VALUES (?,?)",
+                    (metadata[0], base),
+                )
+                if not report.rowcount:
+                    return 0
+            if station_entries:
+                for event_at, detail, unique_id in station_entries:
+                    notes.create_in(
+                        conn,
+                        actor_id,
+                        metadata[1],
+                        detail["text"],
+                        unique_id,
+                        observed_at=event_at,
+                        critical=detail.get("critical", False),
+                    )
+            if not prepared:
+                return 0
+            inserted = conn.executemany(
+                """INSERT INTO ground_turn_events
+                     (turn_key,kind,event_at,actor_id,recorded_at,source,request_id,detail)
+                   VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(turn_key,request_id) DO NOTHING""",
+                (
                     (
                         metadata[0],
                         kind,
                         event_at,
                         actor_id,
                         recorded_at,
+                        source,
                         unique_id,
                         detail,
-                    ),
+                    )
+                    for kind, event_at, detail, unique_id in prepared
+                ),
+            )
+            return inserted.rowcount
+
+    def current_markers(self, turn_keys):
+        keys = tuple(dict.fromkeys(turn_keys))
+        if not keys:
+            return {}
+        markers = defaultdict(lambda: {"blockers": [], "ready_at": None})
+        now = _timestamp(datetime.now(UTC))
+        with self._connect() as conn:
+            for offset in range(0, len(keys), 200):
+                batch = keys[offset : offset + 200]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"""
+                    WITH ranked_markers AS (
+                        SELECT turn_key, kind, event_at, detail,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY turn_key, json_extract(detail, '$.process')
+                                   ORDER BY id DESC
+                               ) AS position
+                        FROM ground_turn_events
+                        WHERE kind IN ('BLOCKER_OPEN', 'BLOCKER_CLOSE', 'REPORTED_READY') AND event_at<=?
+                          AND turn_key IN ({placeholders})
+                    )
+                    SELECT turn_key, kind, event_at, detail FROM ranked_markers
+                    WHERE position=1 AND kind!='BLOCKER_CLOSE' ORDER BY event_at
+                    """,
+                    (now, *batch),
                 )
-                count += result.rowcount
-        return count
+                for row in rows:
+                    state = markers[row["turn_key"]]
+                    if row["kind"] == "REPORTED_READY":
+                        state["ready_at"] = row["event_at"]
+                    else:
+                        state["blockers"].append(
+                            {**json.loads(row["detail"]), "opened_at": row["event_at"]}
+                        )
+        return dict(markers)
 
     def events(self, turn_key, limit=100):
         with self._connect() as conn:
@@ -413,7 +477,6 @@ class GroundTurnStore:
         }
 
     def station_report(self, station, *, days=180):
-        """Manual-only metrics; corrections use the newest event for each kind."""
         from datetime import timedelta
 
         since = _timestamp(datetime.now(UTC) - timedelta(days=days))
@@ -423,7 +486,7 @@ class GroundTurnStore:
                           event.recorded_at, session.first_seen_at
                    FROM ground_turn_events event
                    JOIN ground_turn_sessions session ON session.turn_key=event.turn_key
-                   WHERE session.station=? AND event.source='telegram'
+                   WHERE session.station=? AND event.source IN ('telegram','miniapp')
                    ORDER BY event.id""",
                 (station,),
             ).fetchall()

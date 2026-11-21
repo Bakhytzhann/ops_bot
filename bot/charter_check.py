@@ -1,5 +1,3 @@
-"""Charter fleet, requests and historical flight statistics."""
-
 import asyncio
 import re
 import sqlite3

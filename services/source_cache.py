@@ -1,5 +1,3 @@
-"""Bounded async cache with single-flight loading and explicit invalidation."""
-
 import asyncio
 from collections import OrderedDict
 from time import monotonic

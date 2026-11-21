@@ -1,10 +1,9 @@
-"""Authenticated HTTP entry points for the OPS dashboard tools."""
-
 import asyncio
+import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
@@ -20,7 +19,9 @@ from services.charter_intelligence import (
 )
 from services.charter_recommendations import charter_priorities
 from services.fleet_operations import charter_sales_access
-from services.ground_turns import KINDS, ground_turns
+from services.ground_input import GroundModelUnavailable, parse_ground_input
+from services.ground_turns import KINDS, MAX_REPORT_ITEMS, STATION_NOTE, ground_turns
+from services.station_notes import notes
 
 Actor = Annotated[int, Depends(require_telegram_access)]
 PositiveId = Annotated[int, Path(gt=0, lt=2**63)]
@@ -30,8 +31,7 @@ AirportFilter = Annotated[str | None, Query(pattern=r"^[A-Z0-9]{4}$")]
 TypeFilter = Annotated[str | None, Query(pattern=r"^[A-Z0-9]{2,4}$")]
 
 
-class GroundEvent(BaseModel):
-    request_id: UUID
+class GroundEventData(BaseModel):
     kind: str
     event_at: AwareDatetime | None = None
     target_at: AwareDatetime | None = None
@@ -44,7 +44,7 @@ class GroundEvent(BaseModel):
 
     @model_validator(mode="after")
     def valid_event(self):
-        if self.kind not in KINDS:
+        if self.kind not in KINDS | {STATION_NOTE}:
             raise ValueError("Unknown ground event.")
         if self.kind in {"BLOCKER_OPEN", "BLOCKER_CLOSE"} and self.process is None:
             raise ValueError("Select a blocked process.")
@@ -52,7 +52,7 @@ class GroundEvent(BaseModel):
             raise ValueError("Enter a blocker reason of up to 160 characters.")
         if self.kind == "TARGET" and self.target_at is None:
             raise ValueError("Enter a UTC target.")
-        if self.kind in {"NOTE", "STAND"} and not self.text.strip():
+        if self.kind in {"NOTE", "STAND", STATION_NOTE} and not self.text.strip():
             raise ValueError("Enter details.")
         return self
 
@@ -66,9 +66,45 @@ class GroundEvent(BaseModel):
             return detail
         if self.kind == "STAND":
             return {"stand": self.text.strip()}
-        if self.kind == "NOTE":
+        if self.kind in {"NOTE", STATION_NOTE}:
             return {"text": self.text.strip(), "critical": self.critical}
         return {}
+
+
+class GroundEvent(GroundEventData):
+    request_id: UUID
+
+
+class GroundReport(BaseModel):
+    request_id: UUID
+    items: list[GroundEventData] = Field(min_length=1, max_length=MAX_REPORT_ITEMS)
+
+
+class GroundReportText(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+
+
+class GroundReportPreview(GroundReport):
+    station_notes_allowed: bool
+
+
+def event_time(event, turn, now):
+    when = event.event_at or now
+    if not now - timedelta(hours=24) <= when <= now:
+        raise HTTPException(422, "Event UTC must be within the last 24 hours.")
+    if (
+        event.kind == "BLOCKER_OPEN"
+        and event.expected_at is not None
+        and event.expected_at <= now
+    ):
+        raise HTTPException(422, "Expected clear UTC must be in the future.")
+    if not turn["outbound_id"] and event.kind in {"OUT_BLOCK", "TARGET"}:
+        raise HTTPException(422, "This turn has no verified outbound leg.")
+    return when
+
+
+def flight_code(value):
+    return re.sub(r"[\s-]", "", value or "").upper()
 
 
 def create_ops_router(flights, flight_window):
@@ -98,19 +134,10 @@ def create_ops_router(flights, flight_window):
 
     @router.post("/ground/turns/{key}/events")
     async def record_event(key: TurnKey, event: GroundEvent, actor: Actor):
-        now = datetime.now(UTC)
-        when = event.event_at or now
-        if not now - timedelta(hours=24) <= when <= now:
-            raise HTTPException(422, "Event UTC must be within the last 24 hours.")
-        if (
-            event.kind == "BLOCKER_OPEN"
-            and event.expected_at is not None
-            and event.expected_at <= now
-        ):
-            raise HTTPException(422, "Expected clear UTC must be in the future.")
+        if event.kind == STATION_NOTE:
+            raise HTTPException(422, "Use a ground report to save a station note.")
         turn, state = await resolve_turn(key)
-        if not turn["outbound_id"] and event.kind in {"OUT_BLOCK", "TARGET"}:
-            raise HTTPException(422, "This turn has no verified outbound leg.")
+        when = event_time(event, turn, datetime.now(UTC))
         try:
             await asyncio.to_thread(
                 ground_turns.record,
@@ -133,6 +160,86 @@ def create_ops_router(flights, flight_window):
         except (OSError, sqlite3.Error):
             raise HTTPException(
                 503, "OPS journal unavailable. Retry this event."
+            ) from None
+
+    @router.post("/ground/turns/{key}/parse")
+    async def parse_report(
+        key: TurnKey, report: GroundReportText, actor: Actor
+    ) -> GroundReportPreview:
+        turn, _ = await resolve_turn(key)
+        now = datetime.now(UTC)
+        try:
+            flight, records = await parse_ground_input(
+                report.text,
+                (actor, key),
+                now=now,
+                station_notes=True,
+            )
+        except GroundModelUnavailable:
+            raise HTTPException(
+                503, "Qwen is unavailable. Try again or use the ground controls."
+            ) from None
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        if flight and flight_code(flight) not in {
+            flight_code(turn.get("inbound_number")),
+            flight_code(turn.get("outbound_number")),
+        }:
+            raise HTTPException(422, "The reported flight does not match this turn.")
+        items = []
+        for kind, when, detail in records:
+            item = GroundEventData(
+                kind=kind,
+                event_at=when,
+                process=detail.get("process"),
+                text=detail.get("reason")
+                or detail.get("stand")
+                or detail.get("text", ""),
+                expected_at=detail.get("expected_at"),
+                target_at=detail.get("target_at"),
+                critical=detail.get("critical", False),
+            )
+            event_time(item, turn, now)
+            items.append(item)
+        try:
+            station_notes_allowed = any(
+                event.kind == STATION_NOTE for event in items
+            ) and bool(await asyncio.to_thread(notes.role, actor))
+        except (OSError, sqlite3.Error):
+            raise HTTPException(503, "OPS journal unavailable. Try again.") from None
+        return GroundReportPreview(
+            request_id=uuid4(), items=items, station_notes_allowed=station_notes_allowed
+        )
+
+    @router.post("/ground/turns/{key}/events/batch")
+    async def record_report(key: TurnKey, report: GroundReport, actor: Actor):
+        turn, state = await resolve_turn(key)
+        now = datetime.now(UTC)
+        records = [
+            (event.kind, event_time(event, turn, now), event.details())
+            for event in report.items
+        ]
+        try:
+            await asyncio.to_thread(
+                ground_turns.record_many,
+                turn,
+                records,
+                actor_id=actor,
+                request_id=f"miniapp:{actor}:{report.request_id}",
+                source="miniapp",
+            )
+            return await views.ground_detail(turn, state)
+        except PermissionError:
+            raise HTTPException(
+                403, "Verified staff required for station notes."
+            ) from None
+        except ValueError:
+            raise HTTPException(
+                422, "Invalid ground report. Check the details."
+            ) from None
+        except (OSError, sqlite3.Error):
+            raise HTTPException(
+                503, "OPS journal unavailable. Retry this report."
             ) from None
 
     @router.get("/ground/stations/{station}")

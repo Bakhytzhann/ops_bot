@@ -1,5 +1,3 @@
-"""Operational inputs and results, without caller identity."""
-
 from dataclasses import dataclass
 
 from integrations.awc.client import get_weather

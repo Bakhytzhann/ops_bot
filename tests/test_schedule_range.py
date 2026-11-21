@@ -9,7 +9,6 @@ from integrations.leon import tools
 
 @pytest.fixture
 def leon(monkeypatch):
-    # Replace authorization with a local test identity policy; never call Leon.
     monkeypatch.setattr(settings, "telegram_allowed_user_ids", "42")
     token = current_user_id.set(42)
     mock = AsyncMock()

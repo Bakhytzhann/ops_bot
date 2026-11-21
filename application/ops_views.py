@@ -1,5 +1,3 @@
-"""OPS tools over the existing Leon, flight-history and ground services."""
-
 import asyncio
 import re
 import sqlite3
@@ -86,6 +84,7 @@ def _leg(row):
         "arrival": row.get("arrival"),
         "std": utc(row.get("departureUTC")),
         "sta": utc(row.get("arrivalUTC")),
+        "ferry": row.get("ferry") is True,
     }
 
 
@@ -121,8 +120,10 @@ class OpsViews:
                 async with self.slots:
                     snapshot = await load_ground_flights(now=now, refresh=refresh)
             cards = snapshot["cards"]
-            outs = await asyncio.to_thread(
-                ground_turns.recent_outs, [turn["key"] for turn in cards]
+            keys = [turn["key"] for turn in cards]
+            outs, markers = await asyncio.gather(
+                asyncio.to_thread(ground_turns.recent_outs, keys),
+                asyncio.to_thread(ground_turns.current_markers, keys),
             )
         except SOURCE_ERRORS as exc:
             logger.warning("Ground Status unavailable ({})", type(exc).__name__)
@@ -138,7 +139,17 @@ class OpsViews:
                 turn, outs.get(turn["key"]), now
             )
             if status:
-                items.append({**turn, "status": status, "reference_time": reference})
+                items.append(
+                    {
+                        **turn,
+                        "status": status,
+                        "reference_time": reference,
+                        "blockers": markers.get(turn["key"], {}).get("blockers", []),
+                        "ready_at": markers.get(turn["key"], {}).get("ready_at")
+                        if status == "active"
+                        else None,
+                    }
+                )
         return {
             **source_state(
                 snapshot["fetched_at"], 45, complete=snapshot["schedule_complete"]

@@ -1,5 +1,3 @@
-"""Parameter parsing shared by button and command adapters."""
-
 import re
 
 from application import operations

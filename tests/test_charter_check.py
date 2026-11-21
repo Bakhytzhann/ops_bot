@@ -1,5 +1,3 @@
-"""Read-only charter fleet monitor must never fabricate live position or clearance."""
-
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock

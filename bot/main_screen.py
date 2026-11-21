@@ -1,9 +1,3 @@
-"""Route operational Telegram output to one durable message per private chat.
-
-The transport adapters keep the existing flight and command handlers independent
-of message ownership. Access notifications remain separate from navigation.
-"""
-
 import asyncio
 from contextlib import suppress
 from secrets import token_hex
@@ -27,7 +21,6 @@ PAGE_SIZE = 3900
 
 
 def text_pages(text):
-    """Respect Telegram's UTF-16 offsets, including emoji and other non-BMP text."""
     pages = []
     start = units = offset = 0
     for index, char in enumerate(text):
@@ -52,8 +45,6 @@ class MainScreen:
         self.keyboard_installed = False
 
     async def install_keyboard(self):
-        # Keep this message: deleting the reply-keyboard carrier can hide the
-        # keyboard in Telegram clients. The editable screen is a separate message.
         await self.context.bot.send_message(
             chat_id=self.chat_id,
             text="OPS Bot",
@@ -148,8 +139,6 @@ class MainScreen:
         )
 
     async def _write(self, text, **kwargs):
-        # Serialize writes, not the upstream API requests. A later button press
-        # invalidates earlier responses without holding up new navigation.
         key = (self.chat_id, self.user_id)
         lock = _write_locks.setdefault(key, asyncio.Lock())
         async with lock:
@@ -190,7 +179,6 @@ class MainScreen:
             return message
 
     async def _finish_screen(self, bot):
-        """Retire the last completed screen only after its replacement renders."""
         state = self.context.user_data
         if self.generation != state.get("screen_generation", 0):
             return
@@ -198,7 +186,6 @@ class MainScreen:
         state["last_completed_screen_id"] = self.message_id
         state.pop("pending_screen_message_id", None)
         if old_id and old_id != self.message_id:
-            # Cleanup must not hide a successfully loaded result.
             with suppress(AttributeError, TelegramError):
                 await bot.delete_message(chat_id=self.chat_id, message_id=old_id)
 
@@ -322,7 +309,6 @@ async def dispatch_screen(update, context, handler):
         if previous:
             context.user_data["screen_back"] = previous
     elif query and (query.data or "").startswith(("fl:", "fc:", "wk:", "sk:", "sv:")):
-        # These screens have their own contextual return actions.
         context.user_data.pop("screen_back", None)
 
     context.user_data["screen_generation"] = (
@@ -332,15 +318,11 @@ async def dispatch_screen(update, context, handler):
     if restarting:
         await screen.install_keyboard()
     elif not query and text in HOME_ACTIONS:
-        # Reply keyboard sends a real chat message. Remove only these six
-        # service commands; leave ordinary user input and slash commands alone.
         with suppress(AttributeError, TelegramError):
             await context.bot.delete_message(
                 chat_id=screen.chat_id, message_id=update.effective_message.message_id
             )
 
-        # A new message puts the active work below the old, still readable
-        # result. Keep the previous completed screen until a result is rendered.
         lock = _write_locks.setdefault((screen.chat_id, screen.user_id), asyncio.Lock())
         async with lock:
             if screen.generation != context.user_data.get("screen_generation", 0):

@@ -1,5 +1,3 @@
-"""Flight Card, multi-station WX and exact NOTAM navigation regression tests."""
-
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from types import SimpleNamespace
@@ -117,9 +115,7 @@ def notams(card):
         for i in range(12)
     ]
     rows[1].schedule = "DAILY 1000-1100"
-    rows[2].starts = start + timedelta(
-        hours=1
-    )  # Affects later flight, inactive at snapshot.
+    rows[2].starts = start + timedelta(hours=1)
     card.flight.update(
         departureUTC=(start + timedelta(hours=2)).isoformat(),
         arrivalUTC=(start + timedelta(hours=3)).isoformat(),
@@ -301,7 +297,6 @@ async def test_snapshot_stores_actual_crew_codes_and_loads_only_new_alternates(
         AsyncMock(return_value={"route": card.blocks["route"]}),
     )
     alt = AsyncMock(return_value={"reports": [], "errors": []})
-    # Alternate weather is fetched only on demand in Preparation.
     result = await snapshots.load_flight_snapshot(card.flight)
     assert result.blocks["crew"].details["codes"] == ["VVI", "YMA"]
     alt.assert_not_awaited()

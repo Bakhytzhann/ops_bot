@@ -1,8 +1,7 @@
-"""Private, authorized Telegram adapter for button-driven operations."""
-
 import asyncio
 import logging
 import re
+from functools import partial
 from hashlib import sha256
 from html import escape
 from time import perf_counter
@@ -10,7 +9,7 @@ from time import perf_counter
 from loguru import logger as timing_logger
 from telegram import BotCommandScopeAllPrivateChats, ForceReply, Update
 from telegram.constants import ChatAction
-from telegram.error import Conflict, TelegramError
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -56,7 +55,7 @@ from bot.ground_turns import (
 from bot.keyboards import SCHEDULE_BUTTON
 from bot.main_screen import HOME_ACTIONS, dispatch_screen
 from bot.message_edits import edit_message_text
-from bot.miniapp import configure_mini_app
+from bot.miniapp import configure_mini_app, publish_tunnel_menu, restore_tunnel_menu
 from bot.ops_brief import ops_brief_callback, show_ops_brief
 from config.instance_lock import windows_instance
 from config.settings import settings
@@ -328,7 +327,6 @@ async def _handle_message(update, context):
             await message.reply_text(help_text())
         elif command and command[0] == "menu":
             await message.reply_text("Выберите раздел на клавиатуре.")
-        # /start only installs the persistent keyboard; no duplicate reply.
         return
     if not command and has_ground_turn_input(context):
         await handle_ground_turn_input(update, context)
@@ -398,7 +396,7 @@ async def _handle_message(update, context):
         await message.reply_text("Ошибка обработки запроса. Попробуйте позже.")
 
 
-async def setup_telegram(application):
+async def setup_telegram(application, *, mini_app_url=None):
     global BOT_USERNAME
     BOT_USERNAME = application.bot.username
     from bot.access import access_store
@@ -416,7 +414,10 @@ async def setup_telegram(application):
         timing_logger.warning(
             "Telegram command menu setup failed: {}", type(exc).__name__
         )
-    await configure_mini_app(application.bot, settings.telegram_mini_app_url)
+    if mini_app_url is None:
+        await configure_mini_app(application.bot, settings.telegram_mini_app_url)
+    else:
+        await publish_tunnel_menu(application, mini_app_url)
 
 
 async def screen_message_handler(update, context):
@@ -430,16 +431,23 @@ async def screen_button_handler(update, context):
     return await dispatch_screen(update, context, handle_button)
 
 
-def create_application():
+def create_application(*, mini_app_url=None):
     if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not configured")
-    application = (
+    post_init = (
+        setup_telegram
+        if mini_app_url is None
+        else partial(setup_telegram, mini_app_url=mini_app_url)
+    )
+    builder = (
         Application.builder()
         .token(settings.telegram_bot_token.get_secret_value())
         .concurrent_updates(settings.telegram_max_parallel)
-        .post_init(setup_telegram)
-        .build()
+        .post_init(post_init)
     )
+    if mini_app_url is not None:
+        builder.post_shutdown(restore_tunnel_menu)
+    application = builder.build()
     application.add_handler(
         CallbackQueryHandler(handle_access_button, pattern=r"^access:")
     )
@@ -450,63 +458,14 @@ def create_application():
     return application
 
 
-async def managed_polling(application, wait_for_stop, on_ready):
-    updater = application.updater
-    stop_requested = asyncio.Event()
-    conflict = None
-
-    def polling_error(error):
-        nonlocal conflict
-        if isinstance(error, Conflict):
-            conflict = error
-            stop_requested.set()
-        else:
-            logger.warning("Telegram polling error: %s", type(error).__name__)
-
-    loop = asyncio.get_running_loop()
-
-    async def poll():
-        async with application:
-            await application.post_init(application)
-            if stop_requested.is_set():
-                return
-            try:
-                await updater.start_polling(
-                    allowed_updates=Update.ALL_TYPES,
-                    drop_pending_updates=True,
-                    error_callback=polling_error,
-                )
-                await application.start()
-                if not stop_requested.is_set():
-                    on_ready()
-                await stop_requested.wait()
-            finally:
-                try:
-                    if updater.running:
-                        await updater.stop()
-                finally:
-                    if application.running:
-                        await application.stop()
-
-    wait_for_stop(lambda: loop.call_soon_threadsafe(stop_requested.set))
-    await poll()
-    if conflict is not None:
-        raise conflict
-
-
-def run_bot(*, watch_for_stop=None, on_ready=None):
-    application = create_application()
-    # Regenerating a token leaves the bot ID intact.
+def run_bot(*, mini_app_url=None):
+    application = create_application(mini_app_url=mini_app_url)
     bot_id = application.bot.token.partition(":")[0]
     lock_name = sha256(bot_id.encode()).hexdigest()
     with windows_instance(f"Global\\OPSBot.Polling.{lock_name}"):
-        if watch_for_stop is None:
-            print("OPS Bot · private authorized chats · button-driven operations")
-            application.run_polling(
-                allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
-            )
-        else:
-            asyncio.run(managed_polling(application, watch_for_stop, on_ready))
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
+        )
 
 
 if __name__ == "__main__":

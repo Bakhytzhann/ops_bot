@@ -1,8 +1,8 @@
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Plane } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import type { CrewMember, CrewPreparation, Display, Load, NotamPreparation, OpsApi, Selection, WeatherPreparation, WeatherReport } from './api'
 import { Badge, Button, Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui'
-import { flightAirport, flightTime, PanelHeader, Resource, StatusBadge, utcStamp } from './presentation'
+import { CopyButton, flightAirport, flightTime, PanelHeader, Resource, StatusBadge, utcStamp, utcTime } from './presentation'
 
 const sections = [
   { id: 'crew', title: 'CREW / FDP' },
@@ -31,9 +31,11 @@ export function Preparation({
   return (
     <>
       <div className="prep-leg">
-        <strong>{flight.number ?? unknown}</strong>
-        <span className="font-mono">{flightAirport(flight, 'departure', mode)} / {flightAirport(flight, 'arrival', mode)}</span>
-        <span className="font-mono text-muted-foreground">{flightTime(flight, 'std', mode)}</span>
+        <div className="flex items-center gap-2 font-mono font-semibold">
+          <span>{flightAirport(flight, 'departure', mode)}</span><Plane size={15} className="text-primary" aria-hidden="true" />
+          <span>{flightAirport(flight, 'arrival', mode)}</span>
+        </div>
+        <span className="minor">STD {flightTime(flight, 'std', mode)} · STA {flightTime(flight, 'sta', mode)}</span>
       </div>
       <Tabs value={section} onValueChange={(value) => setSection(value as Section)}>
         <TabsList aria-label="Preparation sections">
@@ -67,6 +69,23 @@ function Field({ name, value }: { name: string; value: string | null }) {
   return <div className="contents"><dt>{name}</dt><dd>{value ?? unknown}</dd></div>
 }
 
+function durationMinutes(value?: string | null) {
+  const clock = value?.match(/^(\d+):([0-5]\d)(?::([0-5]\d))?$/)
+  const units = value?.match(/^(\d+)\s*h\s*(\d+)\s*m$/i)
+  const parts = clock ?? units
+  return parts ? Number(parts[1]) * 60 + Number(parts[2]) + Number(parts[3] ?? 0) / 60 : null
+}
+
+function DutyBar({ fdp }: { fdp?: NonNullable<CrewMember['duty']>['metrics'][number] }) {
+  const actual = durationMinutes(fdp?.actual)
+  const limit = durationMinutes(fdp?.limit)
+  if (actual === null || limit === null || limit <= 0) return null
+  return <div className="duty-gauge" data-offence={fdp?.offence || actual > limit}>
+    <div><span>FDP</span><strong>{fdp?.actual} / {fdp?.limit}</strong></div>
+    <progress value={Math.min(actual, limit)} max={limit} aria-label="Flight duty period versus Leon limit" />
+  </div>
+}
+
 function CrewReadout({ member, detailed }: { member: CrewMember; detailed: boolean }) {
   const duty = member.duty
   const fdp = duty?.metrics.find((metric) => metric.name === 'FDP')
@@ -76,6 +95,7 @@ function CrewReadout({ member, detailed }: { member: CrewMember; detailed: boole
     <>
       <strong>{member.name ?? unknown}</strong>
       {member.position && member.position !== member.role && <span className="ml-2 minor">{member.position}</span>}
+      {detailed && <DutyBar fdp={fdp} />}
       <dl className="compact-fields metrics-detail mt-2">
         <Field name="REPORT ON" value={duty?.reporting ? utcStamp(duty.start) : null} />
         <Field name="DUTY OFF" value={duty?.reporting ? utcStamp(duty.end) : null} />
@@ -105,7 +125,7 @@ export function CrewPanel({
 }: { data: CrewPreparation; detailed?: boolean; assignments?: boolean }) {
   return (
     <section className="ops-panel" aria-label="Crew and FDP">
-      <PanelHeader title="CREW / FDP" source="Leon" state={assignments ? { ...data, status: data.available ? 'PARTIAL' : 'UNAVAILABLE' } : data} />
+      <PanelHeader title={detailed ? 'FTL & REST AUDIT' : 'CREW / FDP'} source="Leon" state={assignments ? { ...data, status: data.available ? 'PARTIAL' : 'UNAVAILABLE' } : data} />
       <div className="divide-y divide-border">
         {pilots.map((role) => {
           const members = data.members.filter((member) => member.role === role)
@@ -139,7 +159,9 @@ export function HotelPanel({ data }: { data: CrewPreparation }) {
   )
 }
 
-function Report({ report, full }: { report: WeatherReport; full: boolean }) {
+function Report({ report, full, flightTimeUtc }: { report: WeatherReport; full: boolean; flightTimeUtc?: string | null }) {
+  const window = flightTimeUtc && report.product === 'TAF' ? Date.parse(flightTimeUtc) : NaN
+  const covers = report.valid_from && report.valid_to && Date.parse(report.valid_from) <= window && window < Date.parse(report.valid_to)
   return (
     <div className="mt-2 space-y-1.5 border-t border-border pt-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -152,7 +174,8 @@ function Report({ report, full }: { report: WeatherReport; full: boolean }) {
           {report.product === 'TAF' && (
             <p className="minor">VALID {utcStamp(report.valid_from)} / {utcStamp(report.valid_to)}</p>
           )}
-          <pre className="raw-text">{report.raw}</pre>
+          <pre className="raw-text weather-raw" data-window={!!covers}>{report.raw}</pre>
+          {covers && <p className="minor text-warning">TAF covers scheduled {utcTime(flightTimeUtc)}</p>}
         </>
       ) : <p className="text-sm">{Object.entries(report.facts).map(([key, value]) => key + ' ' + value).join(' · ') || unknown}</p>}
     </div>
@@ -162,22 +185,30 @@ function Report({ report, full }: { report: WeatherReport; full: boolean }) {
 export function WeatherPanel({
   data, selection, mode, detailed = false,
 }: { data: WeatherPreparation; selection: Selection; mode: Display; detailed?: boolean }) {
+  const { flight } = selection
+  const stations = [
+    { station: flight.departure, label: 'DEP ' + flightAirport(flight, 'departure', mode), stamp: flight.std },
+    { station: flight.arrival, label: 'ARR ' + flightAirport(flight, 'arrival', mode), stamp: flight.sta },
+    ...(detailed ? data.stations.filter((station) => station !== flight.departure && station !== flight.arrival)
+      .map((station) => ({ station, label: 'ALTN ' + station, stamp: null })) : []),
+  ]
+  const raw = [...new Set(data.reports.map((item) => item.raw))].join('\n\n')
   return (
     <section className="ops-panel">
-      <PanelHeader title={detailed ? 'WX / TAF' : 'WX · METAR'} source="Leon / AWC" state={data} />
-      {(['departure', 'arrival'] as const).map((side) => {
-        const station = selection.flight[side]
+      <PanelHeader title={detailed ? 'FULL METAR / TAF' : 'WX · CURRENT METAR'} source="Leon / AWC" state={data}
+        action={detailed && raw && <CopyButton text={raw} label="Copy WX" />} />
+      {stations.map(({ station, label, stamp }) => {
         const products = detailed ? ['METAR', 'TAF'] as const : ['METAR'] as const
         return (
-          <div className="border-b border-border p-3 last:border-b-0" key={side}>
-            <h3 className="font-mono text-sm font-semibold">{side === 'departure' ? 'DEP' : 'ARR'} {flightAirport(selection.flight, side, mode)}</h3>
+          <div className="border-b border-border p-3 last:border-b-0" key={label}>
+            <h3 className="font-mono text-sm font-semibold">{label}</h3>
             {products.map((product) => {
               const reports = data.reports.filter((report) => report.station === station && report.product === product)
               if (!reports.length) return <p className="mt-1 text-sm text-muted-foreground" key={product}>{product} · UNAVAILABLE</p>
               return (
                 <div key={product}>
                   {(detailed ? reports : reports.slice(0, 1)).map((report) => (
-                    <Report key={report.raw} report={report} full={detailed} />
+                    <Report key={report.raw} report={report} full={detailed} flightTimeUtc={stamp} />
                   ))}
                   {!detailed && reports.length > 1 && <p className="mt-1 minor">Multiple reports in Preparation.</p>}
                 </div>
@@ -201,6 +232,9 @@ export function WeatherPanel({
 
 function Notams({ data, openLink }: { data: NotamPreparation; openLink: (url: string) => void }) {
   const briefingUrl = data.briefing_url
+  const [filter, setFilter] = useState<'all' | 'affects' | 'review'>('all')
+  const [selectedStation, setSelectedStation] = useState<string>()
+  const stations = data.stations.filter((station) => !selectedStation || station === selectedStation)
   return (
     <section className="ops-panel">
       <PanelHeader title="NOTAM" source="ForeFlight briefing" state={data} />
@@ -215,14 +249,27 @@ function Notams({ data, openLink }: { data: NotamPreparation; openLink: (url: st
           </Button>
         ) : <p>Briefing · UNAVAILABLE</p>}
       </div>
-      {data.stations.map((station) => {
-        const records = data.notams.filter((record) => record.station === station)
+      <div className="notam-filters">
+        <div className="filter-belt" role="group" aria-label="NOTAM severity">
+          {(['all', 'affects', 'review'] as const).map((status) =>
+            <button key={status} className="filter-chip" aria-pressed={filter === status} onClick={() => setFilter(status)}>
+              {status.toUpperCase()} · {data.notams.filter((record) => status === 'all' || record.status === status).length}
+            </button>)}
+        </div>
+        <div className="filter-belt" role="group" aria-label="NOTAM station">
+          <button className="filter-chip" aria-pressed={!selectedStation} onClick={() => setSelectedStation(undefined)}>All stations</button>
+          {data.stations.map((station) => <button key={station} className="filter-chip"
+            aria-pressed={station === selectedStation} onClick={() => setSelectedStation(station)}>{station}</button>)}
+        </div>
+      </div>
+      {stations.map((station) => {
+        const records = data.notams.filter((record) => record.station === station && (filter === 'all' || record.status === filter))
         return (
           <div className="border-b border-border p-3 last:border-b-0" key={station}>
             <h3 className="mb-2 font-mono text-sm font-semibold">{station}</h3>
             {!data.recognized.includes(station) && <p className="text-sm text-muted-foreground">{unknown}</p>}
             {data.recognized.includes(station) && !records.length && (
-              <p className="text-sm text-muted-foreground">No applicable or review items in the briefing.</p>
+              <p className="text-sm text-muted-foreground">{filter === 'all' ? 'No applicable or review items in the briefing.' : 'No items match this filter.'}</p>
             )}
             {records.map((record, index) => (
               <details className="notam-detail" key={record.id + index}>

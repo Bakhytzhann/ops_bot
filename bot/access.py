@@ -1,10 +1,8 @@
-"""Persistent Telegram admission; never imported by operational services."""
-
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from config.settings import TELEGRAM_USER_ID_LIMIT, get_settings
+from config.settings import get_settings
 
 
 class AccessStore:
@@ -92,9 +90,6 @@ class AccessStore:
             "reject": ("rejected", "pending"),
             "revoke": ("revoked", "approved"),
         }[action]
-        return self._update_status(actor, user_id, revision, previous, status)
-
-    def _update_status(self, actor, user_id, revision, previous, status):
         with self.connect() as conn:
             changed = conn.execute(
                 "UPDATE bot_access SET status=?,revision=revision+1,updated_at=?,decided_by=? "
@@ -111,42 +106,6 @@ class AccessStore:
             if not changed:
                 raise ValueError("Заявка уже обработана или кнопка устарела.")
         return self.get(user_id)
-
-    def authorized_users(self):
-        admin_ids = self.settings.admin_ids
-        with self.connect() as conn:
-            records = {
-                row["user_id"]: row["name"]
-                for row in conn.execute("SELECT user_id, name, status FROM bot_access")
-                if row["status"] == "approved" or row["user_id"] in admin_ids
-            }
-        for user_id in admin_ids:
-            records.setdefault(user_id, "")
-        return [(user, records[user], user in admin_ids) for user in sorted(records)]
-
-    def grant_from_desktop(self, user_id):
-        if not 0 < user_id < TELEGRAM_USER_ID_LIMIT:
-            raise ValueError("Enter a valid Telegram user ID.")
-        if user_id in self.settings.admin_ids:
-            return False
-        with self.connect() as conn:
-            return bool(
-                conn.execute(
-                    """INSERT INTO bot_access(user_id,status,updated_at) VALUES(?,'approved',?)
-                    ON CONFLICT(user_id) DO UPDATE SET status='approved',revision=revision+1,
-                    updated_at=excluded.updated_at,decided_by=NULL WHERE status!='approved'""",
-                    (user_id, datetime.now(UTC).isoformat()),
-                ).rowcount
-            )
-
-    def revoke_from_desktop(self, user_id):
-        if user_id in self.settings.admin_ids:
-            raise ValueError("Administrators are managed through TELEGRAM_ADMIN_IDS")
-        record = self.get(user_id)
-        if record is None or record["status"] != "approved":
-            return False
-        self._update_status(None, user_id, record["revision"], "approved", "revoked")
-        return True
 
     def list(self, page=0):
         if page < 0:

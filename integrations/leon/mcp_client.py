@@ -6,6 +6,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPError
+from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult
 
 from config.settings import settings
 
@@ -15,7 +16,6 @@ MCP_URL = settings.leon_mcp_url or f"https://{OPERATOR}.mcpserver.leon.aero/mcp"
 
 TOKEN_URL = f"https://{OPERATOR}.leon.aero/access_token/refresh/"
 
-# Only approved read-only MCP tools.
 ALLOWED_TOOLS = frozenset(
     {
         "search-flights",
@@ -87,7 +87,6 @@ class LeonMCPClient:
             if not token:
                 raise RuntimeError("Leon returned an empty access token")
 
-            # Refresh before the documented 30-minute expiry.
             self._access_token = token
             self._token_expires_at = time.monotonic() + 25 * 60
 
@@ -121,7 +120,6 @@ class LeonMCPClient:
             raise RuntimeError("Leon MCP request failed") from exc
 
     async def list_allowed_tools(self):
-        """Return schemas of approved tools only."""
         async with self._session() as session:
             result = await session.list_tools()
         return [tool for tool in result.tools if tool.name in ALLOWED_TOOLS]
@@ -131,7 +129,6 @@ class LeonMCPClient:
         name: str,
         arguments: dict,
     ):
-        """Execute an approved read-only MCP tool."""
 
         if name not in ALLOWED_TOOLS:
             raise PermissionError(f"MCP tool is not allowed: {name}")
@@ -140,9 +137,11 @@ class LeonMCPClient:
             raise TypeError("Tool arguments must be a dictionary")
 
         async with self._session() as session:
-            result = await session.call_tool(
-                name,
-                arguments,
+            result = await session.send_request(
+                CallToolRequest(
+                    params=CallToolRequestParams(name=name, arguments=arguments)
+                ),
+                CallToolResult,
             )
 
         if result.is_error:

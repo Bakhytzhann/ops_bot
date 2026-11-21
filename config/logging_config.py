@@ -11,7 +11,9 @@ from config.settings import settings
 
 class StandardLogHandler(logging.Handler):
     def emit(self, record):
-        logger.log(record.levelname, "{}: {}", record.name, record.getMessage())
+        logger.opt(exception=record.exc_info).log(
+            record.levelname, "{}: {}", record.name, record.getMessage()
+        )
 
 
 def redact_record(record):
@@ -29,18 +31,19 @@ def redact_record(record):
         record["exception"] = None
 
 
-def setup_logging(*, capture_standard=False):
+def setup_logging():
     settings.log_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     logger.remove()
+    logger.configure(patcher=redact_record)
+    logging.basicConfig(
+        handlers=[StandardLogHandler()], level=logging.WARNING, force=True
+    )
 
-    if capture_standard:
-        logger.configure(patcher=redact_record)
-        logging.basicConfig(handlers=[StandardLogHandler()], level=logging.INFO)
-    elif sys.stderr is not None:
+    if sys.stderr is not None:
         logger.add(
             sys.stderr,
             level="DEBUG" if settings.debug else "INFO",
@@ -56,7 +59,7 @@ def setup_logging(*, capture_standard=False):
         level="INFO",
         backtrace=False,
         diagnose=False,
-        enqueue=not capture_standard,
+        enqueue=True,
     )
 
     for name in ("httpx", "httpcore", "telegram"):

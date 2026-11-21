@@ -1,5 +1,3 @@
-"""Scheduled aircraft positions, upcoming flights and station notes."""
-
 import asyncio
 from datetime import UTC, datetime, timedelta
 from secrets import token_hex

@@ -1,5 +1,3 @@
-"""Source-backed flight snapshot; operational APIs never pass through the model."""
-
 import asyncio
 
 from config.settings import settings
@@ -26,8 +24,6 @@ async def load_flight_snapshot(
         return await cache.get(key, ttl, loader, refresh=refresh)
 
     if from_sked and not refresh:
-        # The selected flight was already validated against the Leon SKED.
-        # Do not request the same schedule again just to open its card.
         flight = selected
         schedule = {"complete": True}
     else:
@@ -155,7 +151,7 @@ async def load_flight_snapshot(
     async def section(name, loader):
         try:
             await asyncio.wait_for(loader(), timeout=settings.snapshot_timeout)
-        except Exception as exc:  # noqa: BLE001 -- source boundary; no payloads/URLs
+        except Exception as exc:
             label = {
                 "crew": "Экипаж",
                 "weather": "Погода",

@@ -1,5 +1,5 @@
 import type {
-  AircraftList, Checklist, Documents, FleetBrief, GroundDetail, GroundEntry, GroundHistory, GroundList,
+  AircraftList, Checklist, Documents, FleetBrief, GroundDetail, GroundEntry, GroundHistory, GroundList, GroundPreview, GroundReport,
   Journey, JourneyDays, JourneyFilters, Operator, Planned, PlannedPeriod, Priorities, RequestDetail, Requests, StationReport,
 } from './ops-types'
 
@@ -162,16 +162,24 @@ export function createOpsApi(headers: HeadersInit) {
     })
   }
 
-  async function recordGround(key: string, entry: GroundEntry, signal: AbortSignal) {
-    const path = 'ground/turns/' + encodeURIComponent(key)
+  async function post<T>(path: string, body: object, signal: AbortSignal) {
     const requestHeaders = new Headers(headers)
     requestHeaders.set('Content-Type', 'application/json')
-    const response = await fetch(root + path + '/events', {
-      method: 'POST', headers: requestHeaders, body: JSON.stringify(entry), signal, cache: 'no-store',
+    const response = await fetch(root + path, {
+      method: 'POST', headers: requestHeaders, body: JSON.stringify(body), signal, cache: 'no-store',
     })
-    const detail = await readResponse<GroundDetail>(response)
+    return readResponse<T>(response)
+  }
+
+  const turnPath = (key: string) => 'ground/turns/' + encodeURIComponent(key)
+
+  async function recordGround(key: string, entry: GroundEntry | GroundReport, signal: AbortSignal) {
+    const path = turnPath(key)
+    const detail = await post<GroundDetail>(path + ('items' in entry ? '/events/batch' : '/events'), entry, signal)
     for (const key of cache.keys()) {
-      if (key.startsWith('ground?') || key.startsWith('ground/stations/') || key.startsWith(path + '?')) cache.delete(key)
+      if (key.startsWith('ground?') || key.startsWith('ground/stations/') ||
+          key.startsWith(path + '?') || key.startsWith(path + '/history?') ||
+          key.startsWith('ops-brief?')) cache.delete(key)
     }
     cache.set(path + '?', { value: detail, until: Date.now() + 15_000 })
     return detail
@@ -199,6 +207,8 @@ export function createOpsApi(headers: HeadersInit) {
     groundHistory: (key: string) => tool<GroundHistory>('ground/turns/' + encodeURIComponent(key) + '/history', 30_000),
     station: (code: string) => tool<StationReport>('ground/stations/' + encodeURIComponent(code), 35_000),
     recordGround,
+    parseGround: (key: string, text: string, signal: AbortSignal) =>
+      post<GroundPreview>(turnPath(key) + '/parse', { text }, signal),
     brief: tool<FleetBrief>('ops-brief', 70_000),
     aircraft: tool<AircraftList>('fleet/aircraft', 240_000),
     documents: (id: number) => tool<Documents>('fleet/aircraft/' + id + '/documents', 35_000),

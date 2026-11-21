@@ -1,5 +1,3 @@
-"""Telegram analytics periods, read-only source summaries and timing tabs."""
-
 import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta

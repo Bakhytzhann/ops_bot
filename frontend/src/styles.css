@@ -2,14 +2,14 @@
 
 :root {
   color-scheme: dark;
-  --background: #0b131d;
-  --foreground: #edf5fc;
-  --card: #131f2c;
-  --muted: #1c2c3c;
-  --muted-foreground: #a7b9cc;
-  --border: #293b4d;
+  --background: #090c10;
+  --foreground: #f4f4f5;
+  --card: #12161d;
+  --muted: #20242b;
+  --muted-foreground: #a1a1aa;
+  --border: #27272a;
   --primary: #6be6bc;
-  --primary-foreground: #0b2c25;
+  --primary-foreground: #09251c;
   --warning: #f6c779;
   --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
@@ -59,7 +59,6 @@
   .caption { @apply uppercase tracking-wider; }
   .minor { @apply max-w-full truncate text-[.7rem]; }
   .screen-content { @apply space-y-3 px-3 py-3 sm:px-4; }
-  .date-bar { @apply flex min-w-0 items-center gap-1.5; }
 
   .date-control {
     @apply relative flex min-h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-card px-2 text-sm font-semibold focus-within:ring-2 focus-within:ring-primary;
@@ -72,16 +71,12 @@
 
   .ops-panel { @apply overflow-hidden rounded-xl border border-border bg-card; }
   .panel-bar { @apply flex min-h-10 items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-sm font-semibold; }
-  .strip { @apply grid w-full grid-cols-[3.5rem_minmax(0,1fr)_minmax(7rem,1.15fr)] items-center gap-2 px-3 text-left; }
-  .strip-head { @apply min-h-8 border-b border-border bg-background/50 font-mono text-[.65rem] uppercase tracking-wider text-muted-foreground; }
-  .strip-flight { @apply min-h-13 py-1.5 text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary; }
-  .strip-flight strong { @apply font-bold; }
 
   .compact-fields { @apply grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 p-3 text-sm; }
   .compact-fields dt { @apply font-mono text-xs text-muted-foreground; }
   .compact-fields dd { @apply min-w-0 wrap-anywhere; }
   .metrics-detail { @apply rounded-md bg-background/70 p-2.5; }
-  .prep-leg { @apply flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card p-2.5 text-sm; }
+  .prep-leg { @apply flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-3 text-sm; }
   .raw-text { @apply whitespace-pre-wrap wrap-anywhere text-xs leading-relaxed; }
 
   .notam-detail { @apply rounded-md border border-border bg-background/70; }
@@ -125,6 +120,153 @@
 
 @media (max-width: 330px) {
   .week-controls button { padding-inline: .45rem; }
-  .strip { grid-template-columns: 3.1rem minmax(0, 1fr) minmax(6.8rem, 1fr); gap: .375rem; }
-  .date-bar .date-control svg { display: none; }
+  .date-control svg { display: none; }
+  .header-title { font-size: .8rem; }
+  .cockpit-clock { gap: .25rem; }
+}
+
+@layer components {
+  .header-title { @apply font-mono text-sm font-bold tracking-wide; }
+  .header-subtitle { @apply truncate font-mono text-[.65rem] font-semibold uppercase tracking-wide text-muted-foreground; }
+  .mode-toggle { @apply shrink-0 px-2.5 font-mono text-[.68rem]; }
+  .cockpit-clock { @apply flex shrink-0 flex-col items-end gap-1 font-mono text-[.68rem] text-muted-foreground; }
+  .cockpit-clock time { @apply whitespace-nowrap; }
+
+  .priority-actions { @apply grid gap-2.5; }
+  .priority-module {
+    @apply grid min-h-23 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl
+      border bg-card px-3.5 py-3 text-left outline-none transition-colors focus-visible:ring-2;
+  }
+  .priority-ground { @apply border-warning/35 bg-warning/5 text-warning hover:bg-warning/10 focus-visible:ring-warning; }
+  .priority-sked { @apply border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 focus-visible:ring-primary; }
+  .priority-copy { @apply grid min-w-0 gap-1; }
+  .priority-copy > strong { @apply font-mono text-xs font-bold tracking-wide text-foreground; }
+  .priority-copy > small { @apply wrap-anywhere text-xs text-muted-foreground; }
+  .priority-metric { @apply grid justify-items-end gap-1 font-mono; }
+  .priority-metric > strong { @apply text-3xl leading-none; }
+  .priority-metric > small { @apply whitespace-nowrap text-[.62rem] font-bold tracking-wider; }
+  .section-kicker { @apply font-mono text-[.72rem] font-bold tracking-wide uppercase; }
+  .dashboard-secondary > h2 { @apply mb-2 px-0.5 text-muted-foreground; }
+  .utility-module {
+    @apply flex min-h-13 min-w-0 items-center gap-2 rounded-xl border border-border bg-card px-2.5
+      text-left font-mono text-[.69rem] font-bold outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary;
+  }
+  .utility-module > svg { @apply shrink-0 text-primary; }
+  .fleet-position { @apply flex flex-wrap justify-between gap-x-2 gap-y-0.5 border-t border-border px-3 py-2.5 font-mono text-xs; }
+
+  .schedule-controls { @apply space-y-2.5 p-2.5; }
+  .week-controls { @apply flex min-w-0 items-center gap-1.5; }
+  .week-controls .date-control { @apply bg-background font-mono text-[.7rem] text-muted-foreground; }
+  .filter-belt {
+    @apply flex items-center gap-1.5 overflow-x-auto p-0.5;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .filter-chip {
+    @apply min-h-9 shrink-0 rounded-lg border border-border bg-background px-2.5 py-1.5
+      font-mono text-[.68rem] font-semibold text-muted-foreground outline-none
+      hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary;
+  }
+  .filter-chip[aria-pressed=true] { @apply border-warning/55 bg-warning/10 text-warning; }
+  .schedule-search { @apply flex min-w-0 items-center gap-2; }
+  .search-field { @apply flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-background px-2.5 text-muted-foreground focus-within:ring-2 focus-within:ring-primary; }
+  .search-field svg { @apply shrink-0; }
+  .search-field input { @apply w-full min-w-0 text-sm text-foreground outline-none; }
+  .schedule-day { @apply border-y border-border bg-background/55 px-3 py-1.5 font-mono text-[.67rem] font-semibold uppercase tracking-wide text-muted-foreground; }
+  .schedule-leg {
+    @apply grid min-h-16 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 border-b
+      border-border px-3 py-2.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary;
+  }
+  .schedule-leg[data-cancelled=true] { @apply text-muted-foreground; }
+  .schedule-times { @apply grid min-w-12 max-w-18 font-mono text-[.7rem] text-warning; }
+  .schedule-times small { @apply text-[.62rem] text-muted-foreground; }
+  .schedule-badges { @apply flex min-w-0 max-w-24 items-center justify-end gap-1 text-muted-foreground; }
+  .schedule-badges > svg { @apply shrink-0; }
+  .schedule-badges [data-slot=badge] { @apply px-1 py-0 text-[.6rem] leading-4; }
+
+  .cockpit-sheet {
+    @apply w-full max-w-[36rem] overflow-y-auto rounded-t-2xl border border-border bg-card text-foreground shadow-2xl;
+    margin: auto auto 0;
+    max-height: min(85dvh, 42rem);
+    padding-bottom: var(--safe-bottom);
+  }
+  .cockpit-sheet::backdrop { background: rgb(0 0 0 / .7); }
+  body:has(.cockpit-sheet[open]) { overflow: hidden; }
+  .sheet-heading { @apply sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-3 font-mono text-sm font-bold; }
+  .sheet-content { @apply grid gap-2.5 p-3; }
+
+  .flight-hero { @apply grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3.5 py-4; }
+  .flight-end { @apply grid min-w-0 gap-1 font-mono; }
+  .flight-end > span { @apply text-[.65rem] tracking-wide text-muted-foreground; }
+  .flight-end > strong { @apply wrap-anywhere text-[clamp(1.15rem,5.5vw,1.7rem)] leading-tight; }
+  .flight-end > time { @apply text-sm font-bold text-warning; }
+  .flight-track { @apply grid justify-items-center gap-2; }
+  .flight-track > span:last-child { @apply flex items-center gap-1 text-primary; }
+  .flight-track > span:last-child::before, .flight-track > span:last-child::after {
+    content: "";
+    @apply h-px w-3 bg-border sm:w-6;
+  }
+  .flight-audit { @apply grid grid-cols-4 divide-x divide-border border-t border-border bg-background/50; }
+  .flight-audit > div { @apply flex flex-col items-center gap-1 px-0.5 py-2 font-mono text-[.65rem] text-muted-foreground; }
+  .flight-audit [data-slot=badge] { @apply px-1 text-[.6rem] leading-4; }
+  .flight-actions { @apply grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2; }
+  .flight-actions button { @apply min-w-0 px-2 text-xs; }
+  .flight-actions svg { @apply shrink-0; }
+  .prep-action { @apply w-full justify-between gap-2 px-3.5 font-mono text-xs; }
+  .prep-action > span { @apply flex items-center gap-1 text-[.63rem]; }
+  .micro-button { @apply min-h-9 px-2 font-mono text-[.68rem]; }
+  .copy-control { @apply inline-flex flex-wrap items-center gap-1 text-xs text-primary; }
+  .duty-gauge { @apply mt-2 grid gap-1 rounded-lg border border-border bg-background/65 p-2.5 font-mono text-xs text-primary; }
+  .duty-gauge > div { @apply flex justify-between gap-2; }
+  .duty-gauge[data-offence=true] { @apply text-warning; }
+  .duty-gauge progress { @apply block h-1.5 w-full rounded-full; accent-color: currentColor; }
+  .weather-raw { @apply rounded-lg border border-border bg-background/70 p-2.5; }
+  .weather-raw[data-window=true] { @apply border-warning/45 bg-warning/8; }
+  .notam-filters { @apply grid gap-1 border-b border-border px-2.5 py-2; }
+
+  .turn-controls { @apply grid min-w-0 gap-2.5 bg-background/30 p-2.5; }
+  .readiness { @apply grid gap-3 p-3; }
+  .progress-steps { @apply grid grid-cols-5 font-mono text-[.65rem] font-semibold text-muted-foreground; }
+  .progress-steps li { @apply relative flex min-w-0 flex-col items-center gap-1; }
+  .progress-steps li + li::before {
+    content: "";
+    @apply absolute right-1/2 top-3 h-px w-full bg-border;
+  }
+  .progress-steps li > span:first-child { @apply z-1 grid size-6 place-items-center rounded-full border border-border bg-background; }
+  .progress-steps li[data-done=true] { @apply text-primary; }
+  .progress-steps li[data-done=true] > span:first-child { @apply border-primary/50 bg-card; }
+  .readiness-times { @apply flex flex-wrap justify-between gap-1 font-mono text-[.65rem] text-muted-foreground; }
+  .quick-report { @apply grid gap-2.5 border-sky-400/30 p-3 text-sky-300; }
+  .report-input { @apply flex min-w-0 items-center gap-1.5; }
+  .report-input textarea {
+    @apply min-w-0 flex-1 resize-y rounded-lg border border-border bg-background px-2 py-1.5
+      text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-sky-400;
+  }
+  .report-parse { @apply px-2.5 font-mono text-xs; }
+  .report-preview { @apply grid gap-2 border-t border-border pt-2.5 text-foreground; }
+  .preview-item { @apply flex min-w-0 items-start gap-2 rounded-lg bg-background p-2.5 text-xs; }
+  .preview-item input { @apply mt-0.5 size-4 shrink-0 accent-primary; }
+  .preview-item small { @apply mt-0.5 block wrap-anywhere text-[.7rem] text-muted-foreground; }
+  .turn-primary { @apply grid grid-cols-[minmax(0,1fr)_auto] gap-2; }
+  .turn-primary button { @apply min-h-13 min-w-0 justify-start px-2.5 font-mono text-xs; }
+  .turn-primary button svg { @apply shrink-0; }
+  .chip-grid { @apply grid grid-cols-2 gap-1.5; }
+  .open-blockers { @apply grid gap-1.5 border-warning/35 bg-warning/5 p-2.5; }
+  .blocker-row { @apply grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-warning/15 pt-2 text-xs; }
+  .blocker-row > div { @apply min-w-0 wrap-anywhere; }
+  .process-grid { @apply grid grid-cols-2 gap-2; }
+  .process-tile {
+    @apply grid min-h-22 min-w-0 gap-1.5 rounded-xl border border-border bg-card px-2.5 py-2
+      text-left font-mono outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary;
+  }
+  .process-tile[data-state=done] { @apply border-primary/35 bg-primary/5; }
+  .process-tile[data-state=active] { @apply border-warning/40 bg-warning/5; }
+  .process-tile:disabled { @apply cursor-default; }
+  .process-tile > span { @apply flex min-w-0 flex-wrap items-center justify-between gap-0.5 text-primary; }
+  .process-tile strong { @apply wrap-anywhere text-[.68rem]; }
+  .process-tile small { @apply block wrap-anywhere text-[.66rem] text-muted-foreground; }
+  .passenger-row { @apply grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2; }
+  .passenger-row > button:last-child { @apply px-2 font-mono text-[.68rem]; }
+  .passenger-process { @apply flex min-h-13 items-center gap-2; }
+  .passenger-process > span { @apply block; }
 }

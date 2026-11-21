@@ -1,5 +1,3 @@
-"""Complete NOTAM lists with text-size pagination and station/filter controls."""
-
 import re
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -37,7 +35,6 @@ def _record_parts(record, budget):
     complete = record.identifier + "\n" + body
     if _units(complete) <= budget:
         return [complete]
-    # Reserve enough digits for every possible part number before splitting.
     bound = len(body)
     label = f"{record.identifier} · PART {bound}/{bound} · CONTINUED\n"
     capacity = budget - _units(label)
@@ -78,7 +75,6 @@ def render_notams(snapshot, token, position, action, page=0, preferences=None):
     count = len(records)
     title = f"NOTAM · {role} {station_label(snapshot, station, preferences)} · {FILTERS[selected]} {count if recognized else '—'}"
     header = flight_reference(snapshot.flight, preferences) + "\n" + title
-    # An upper bound on page count keeps the reserved header width stable.
     bound = 1 + sum(
         _units(record.identifier + record.topic + record.raw) + 1
         for _, record in records

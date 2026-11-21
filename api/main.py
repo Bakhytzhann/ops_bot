@@ -1,5 +1,3 @@
-"""Same-origin FastAPI host for the OPS Mini App."""
-
 from datetime import UTC, date, datetime
 from typing import Annotated
 

@@ -1,5 +1,3 @@
-"""Optional, bounded explanation of already authorized snapshots; no model tools."""
-
 import asyncio
 import hashlib
 import json
@@ -91,7 +89,7 @@ async def request_analysis(sources, scope, *, system_prompt, response_model):
             ),
             timeout=30,
         )
-    except Exception as exc:  # noqa: BLE001 -- optional AI boundary
+    except Exception as exc:
         raise AnalysisUnavailable(
             "AI временно недоступен. Фактические данные доступны на обычных экранах."
         ) from exc

@@ -1,5 +1,3 @@
-"""Duty roster and existing Leon FTL output for exactly the assigned crew."""
-
 import asyncio
 import math
 import re
@@ -46,7 +44,6 @@ def duration_value(value):
 
 
 def seconds_duration(value):
-    """Leon FTL durations are seconds, independently checked against reporting times."""
     return duration_value(value) or "нет данных"
 
 
@@ -61,7 +58,6 @@ def flight_calculation(data, flight_nid):
 
 
 def offence_labels(value, path=""):
-    """Do not infer offences or apply duration units to counts such as days off."""
     if isinstance(value, dict):
         if value.get("offence") is True:
             yield str(value.get("label") or path)
@@ -119,7 +115,6 @@ def reporting_interval(calculation):
         or length <= 0
     ):
         return None
-    # Never turn a calendar ON day into reporting hours, or accept a unit mismatch.
     if abs((end - start).total_seconds() - length) > 60:
         return None
     return start, end
@@ -170,7 +165,6 @@ def assigned_members(crew, flight_nid):
 
 
 def duty_rows(roster, ftl, nid):
-    """Leon per_type is not a duty/off classification; use its definition or FTL."""
     result = {}
     if not isinstance(roster, Exception):
         try:
@@ -214,7 +208,6 @@ async def load_duty(flight, crew, *, include_next_duty=True):
     departure, arrival = utc(flight.get("departureUTC")), utc(flight.get("arrivalUTC"))
     if not departure or not arrival:
         return SourceBlock("Leon", "Duty / Rest: времена рейса не распознаны.")
-    # Look behind midnight and ahead for the next assigned shift. Not a rest calculation.
     interval = {
         "start": (departure - timedelta(days=2)).strftime("%Y-%m-%dT00:00:00Z"),
         "end": (arrival + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59Z"),

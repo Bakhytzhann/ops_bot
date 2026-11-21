@@ -1,5 +1,3 @@
-"""Prioritize the verified metrics shown in the Analytics report."""
-
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 from services.analytics_insights import render_insights

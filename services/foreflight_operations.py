@@ -1,5 +1,3 @@
-"""Deterministic ForeFlight flight lookup, presentation and Leon comparison."""
-
 import math
 import re
 from datetime import UTC, date, datetime, timedelta

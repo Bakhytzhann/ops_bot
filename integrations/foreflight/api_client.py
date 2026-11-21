@@ -1,5 +1,3 @@
-"""ForeFlight Dispatch GET-only client. Credentials never leave official hosts."""
-
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -27,7 +25,6 @@ class ForeFlightClient:
     async def __aenter__(self):
         if self._http is not None:
             raise RuntimeError("ForeFlight client is already open")
-        # A configured legacy official URL is normalized to the current host.
         url = urlsplit(self.config.foreflight_api_url or BASE_URL)
         if (
             url.scheme != "https"
@@ -78,7 +75,6 @@ class ForeFlightClient:
     async def _get(self, path, *, params=None):
         if self._http is None:
             raise RuntimeError("Use ForeFlightClient as an async context manager")
-        # Keep even internal calls within this integration's documented GET routes.
         parts = path.split("/")
         static = {"apiKeyInfo", "aircraft", "Flights/flights", "savedroutes"}
         allowed = path in static
@@ -110,8 +106,6 @@ class ForeFlightClient:
     @staticmethod
     def _flight_id(value):
         try:
-            # Preserve the original spelling, including compact IDs without
-            # hyphens, as returned by List Flights.
             text = str(value)
             UUID(text)
             if len(text) not in (32, 36) or any(

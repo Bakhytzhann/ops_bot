@@ -1,5 +1,3 @@
-"""Private station reports, verified staff bindings and transactional audit history."""
-
 import json
 import re
 import sqlite3
@@ -14,13 +12,23 @@ MODERATORS = {"Ops", "Admin"}
 
 class NotesRepository:
     def __init__(self, path=None):
-        self.path = path or settings.database_path
+        self.path = path
 
     @contextmanager
     def connect(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path, timeout=10)
+        path = self.path or settings.database_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path, timeout=10)
         conn.row_factory = sqlite3.Row
+        try:
+            self.ensure_schema(conn)
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
+    @staticmethod
+    def ensure_schema(conn):
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS station_staff (
                 telegram_id INTEGER PRIMARY KEY, employee_id TEXT NOT NULL UNIQUE,
@@ -50,11 +58,6 @@ class NotesRepository:
             INSERT OR IGNORE INTO station_schema_migrations(version,applied_at)
                 VALUES(1, strftime('%Y-%m-%dT%H:%M:%SZ','now'));
         """)
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
 
     def bind(self, telegram_id, employee_id, role):
         if role not in ROLES or not employee_id.strip() or telegram_id <= 0:
@@ -96,42 +99,63 @@ class NotesRepository:
     def create(
         self, user, station, text, request_id, *, observed_at=None, flight_id=None
     ):
-        if not re.fullmatch(r"[A-Z]{4}", station) or not 1 <= len(text.strip()) <= 2000:
-            raise ValueError("Station/text invalid")
-        now = datetime.now(UTC).isoformat()
-        observed_at = observed_at or now
-        stamp = datetime.fromisoformat(observed_at)
-        if stamp.tzinfo is None or stamp > datetime.now(UTC):
-            raise ValueError("Observation time must be UTC and not in the future")
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            role = self._role(conn, user)
-            if not role:
-                raise PermissionError("Verified staff required")
-            existing = conn.execute(
-                "SELECT * FROM station_notes WHERE request_id=?", (request_id,)
-            ).fetchone()
-            if existing:
-                if existing["author_id"] != user:
-                    raise PermissionError("Request belongs to another author")
-                return existing["id"]
-            cursor = conn.execute(
-                "INSERT INTO station_notes(station_icao,flight_id,author_id,author_role,text,observed_at_utc,created_at_utc,updated_at_utc,request_id) VALUES(?,?,?,?,?,?,?,?,?)",
-                (
-                    station,
-                    flight_id,
-                    user,
-                    role,
-                    text.strip(),
-                    stamp.astimezone(UTC).isoformat(),
-                    now,
-                    now,
-                    request_id,
-                ),
+            return self.create_in(
+                conn,
+                user,
+                station,
+                text,
+                request_id,
+                observed_at=observed_at,
+                flight_id=flight_id,
             )
-            note_id = cursor.lastrowid
-            self._audit(conn, note_id, user, "create", now)
-            return note_id
+
+    def create_in(
+        self,
+        conn,
+        user,
+        station,
+        text,
+        request_id,
+        *,
+        observed_at=None,
+        flight_id=None,
+        critical=False,
+    ):
+        if not re.fullmatch(r"[A-Z]{4}", station) or not 1 <= len(text.strip()) <= 2000:
+            raise ValueError("Station/text invalid")
+        now = datetime.now(UTC)
+        stamp = datetime.fromisoformat(observed_at) if observed_at else now
+        if stamp.tzinfo is None or stamp > now:
+            raise ValueError("Observation time must be UTC and not in the future")
+        role = self._role(conn, user)
+        if not role:
+            raise PermissionError("Verified staff required")
+        existing = conn.execute(
+            "SELECT id,author_id FROM station_notes WHERE request_id=?", (request_id,)
+        ).fetchone()
+        if existing:
+            if existing["author_id"] != user:
+                raise PermissionError("Request belongs to another author")
+            return existing["id"]
+        cursor = conn.execute(
+            "INSERT INTO station_notes(station_icao,flight_id,author_id,author_role,text,category,observed_at_utc,created_at_utc,updated_at_utc,request_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                station,
+                flight_id,
+                user,
+                role,
+                text.strip(),
+                "safety" if critical else None,
+                stamp.astimezone(UTC).isoformat(),
+                now.isoformat(),
+                now.isoformat(),
+                request_id,
+            ),
+        )
+        self._audit(conn, cursor.lastrowid, user, "create", now.isoformat())
+        return cursor.lastrowid
 
     @staticmethod
     def _audit(conn, note_id, user, action, now):

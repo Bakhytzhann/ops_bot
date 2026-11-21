@@ -204,7 +204,6 @@ async def test_start_responds_for_allowed_and_pending_users(context, user):
     event = update(user=user)
     await bot.handle_message(event, context)
     if user == 42:
-        # The authorized /start handler installs the keyboard in dispatch_screen.
         event.effective_message.reply_text.assert_not_awaited()
     else:
         event.effective_message.reply_text.assert_awaited_once()

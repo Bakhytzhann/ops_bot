@@ -1,5 +1,3 @@
-"""Direct routes for operational requests, independent of LLM tool selection."""
-
 import asyncio
 import re
 from datetime import UTC, datetime
@@ -32,7 +30,6 @@ async def flight_weather(number: str, date: str, include_taf: bool = False) -> d
 async def selected_flight_weather(
     flight: dict, date: str, include_taf: bool = False
 ) -> dict:
-    """Use a verified exact flight NID; identical flight numbers may have many legs."""
     if type(flight.get("flightNid")) is not int or flight["flightNid"] <= 0:
         raise ValueError("Некорректный идентификатор выбранного рейса.")
     airports = [flight.get("departure"), flight.get("arrival")]

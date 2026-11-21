@@ -1,5 +1,3 @@
-"""Scheduled fleet position and station-note selection shared by both OPS clients."""
-
 import asyncio
 import re
 from datetime import UTC, datetime, timedelta
@@ -19,7 +17,6 @@ def charter_sales_access(user_id):
 
 
 def build_fleet(schedule, now=None):
-    """Group complete, non-cancelled Leon schedule by actual registration."""
     now = now or datetime.now(UTC)
     groups = {}
     for flight in schedule.get("flights") or []:
@@ -67,7 +64,6 @@ def build_fleet(schedule, now=None):
 
 
 def station_for_aircraft(item):
-    """Only the latest past scheduled arrival, not a guessed future location."""
     if item["active"] or item["last"] is None:
         return None
     station = item["last"].get("arrival")
@@ -77,7 +73,6 @@ def station_for_aircraft(item):
 
 
 def current_notes(rows, now):
-    """Unarchived notes from 30 days; pinned older notes remain visibly dated."""
     cutoff = now - timedelta(days=NOTE_LOOKBACK_DAYS)
     selected = []
     for row in rows:

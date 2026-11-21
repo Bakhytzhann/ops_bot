@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { ApiError, type Display, type Flight, type Load, type SourceState, type Status } from './api'
 import { Badge, Button } from './components/ui'
 
-export function utcTime(value: string | null) {
+export function utcTime(value: string | null | undefined) {
   return value ? new Date(value).toISOString().slice(11, 16) + 'Z' : '—'
 }
 
@@ -43,30 +43,23 @@ export function StatusBadge({ status, until }: { status: Status; until?: string 
   return <Badge variant={shown === 'READY' ? 'accent' : shown === 'UNAVAILABLE' ? 'default' : 'warning'}>{shown}</Badge>
 }
 
-export function PanelHeader({ title, source, state }: { title: string; source: string; state: SourceState }) {
+export function PanelHeader({ title, source, state, action }: { title: string; source: string; state: SourceState; action?: ReactNode }) {
   return (
     <div className="panel-bar flex-wrap">
       <div><h2>{title}</h2><p className="minor">{source}{state.fetched_at && ' · ' + utcTime(state.fetched_at)}</p></div>
-      <StatusBadge status={state.status} until={state.fresh_until} />
+      <span className="flex flex-wrap items-center gap-2">{action}<StatusBadge status={state.status} until={state.fresh_until} /></span>
     </div>
   )
 }
 
 type Result<T> = { data: T; error: null } | { data: null; error: Error }
 
-export function Resource<T>({
-  load, label, pending, children, refreshKey = 0,
-}: {
-  load: Load<T>
-  label: string
-  pending?: ReactNode
-  children: (data: T, refresh: () => void, refreshing: boolean) => ReactNode
-  refreshKey?: number
-}) {
+export function useResource<T>(load: Load<T> | undefined, refreshKey = 0) {
   const [attempt, setAttempt] = useState(0)
   const requestId = attempt + ':' + refreshKey
   const [result, setResult] = useState<{ load: typeof load; id: string; value: Result<T> }>()
   useEffect(() => {
+    if (!load) return
     const request = new AbortController()
     load(request.signal, attempt > 0 || refreshKey > 0).then(
       (data) => { if (!request.signal.aborted) setResult({ load, id: requestId, value: { data, error: null } }) },
@@ -75,9 +68,27 @@ export function Resource<T>({
     return () => request.abort()
   }, [load, attempt, refreshKey, requestId])
 
-  const refreshing = result?.id !== requestId
-  const value = result?.load === load && (!refreshing || !result.value.error) ? result.value : null
+  const refreshing = result?.load !== load || result?.id !== requestId
+  const value = result && result.load === load && (!refreshing || !result.value.error) ? result.value : null
   const refresh = () => setAttempt((n) => n + 1)
+  return { value, data: value?.data ?? undefined, refresh, refreshing }
+}
+
+type ResourceProps<T> = {
+  label: string; pending?: ReactNode
+  children: (data: T, refresh: () => void, refreshing: boolean) => ReactNode
+}
+
+export function Resource<T>({ load, refreshKey = 0, ...props }: ResourceProps<T> & {
+  load: Load<T>; refreshKey?: number
+}) {
+  return <ResourceView result={useResource(load, refreshKey)} {...props} />
+}
+
+export function ResourceView<T>({ result, label, pending, children }: ResourceProps<T> & {
+  result: ReturnType<typeof useResource<T>>
+}) {
+  const { value, refresh, refreshing } = result
   if (!value) {
     return <>{pending}<div className="read-state" role="status"><span className="loading-dot" />Loading {label}…</div></>
   }
@@ -95,4 +106,46 @@ export function Resource<T>({
     )
   }
   return children(value.data, refresh, refreshing)
+}
+
+export function useUtcClock() {
+  const [now, setNow] = useState(() => new Date().toISOString())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date().toISOString()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return now
+}
+
+export function CopyButton({ text, label }: { text: string; label: string }) {
+  const [message, setMessage] = useState('')
+  function copyFromField() {
+    const field = document.createElement('textarea')
+    field.value = text
+    field.style.position = 'fixed'
+    field.style.opacity = '0'
+    const parent = document.querySelector('dialog[open]') ?? document.body
+    parent.append(field)
+    field.select()
+    try {
+      return document.execCommand('copy')
+    } finally {
+      field.remove()
+    }
+  }
+  async function copy() {
+    try {
+      const clipboard = navigator.clipboard
+      const copied = clipboard?.writeText
+        ? await clipboard.writeText(text).then(() => true, copyFromField)
+        : copyFromField()
+      setMessage(copied ? 'Copied' : 'Copy unavailable')
+    } catch {
+      setMessage('Copy unavailable')
+    }
+  }
+  return <span className="copy-control">
+    <Button type="button" variant="outline" className="micro-button" disabled={!text} onClick={() => { void copy() }}>{label}</Button>
+    {message && <span role="status" aria-live="polite">{message}</span>}
+  </span>
 }

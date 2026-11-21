@@ -1,5 +1,3 @@
-"""Ground-turn timing and source-backed station remarks."""
-
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field

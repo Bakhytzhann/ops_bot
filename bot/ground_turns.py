@@ -1,5 +1,3 @@
-"""Shared ground-handling cards and event entry in private Telegram chats."""
-
 import asyncio
 import re
 import sqlite3
@@ -249,8 +247,6 @@ GROUPED_EVENTS = (
 
 
 def _card_text(turn, events, *, local=False):
-    # Later manual recordings supersede earlier ones; every correction
-    # remains in the append-only audit log.
     latest = {}
     notes = []
     for entry in sorted(events, key=lambda event: event["id"]):
@@ -319,7 +315,7 @@ def _card_text(turn, events, *, local=False):
 async def _show_card(update, state, index):
     turn = state["cards"][index]
     if state.get("current") != index:
-        state["local"] = False  # UTC is always the default for each card.
+        state["local"] = False
     state["current"] = index
     state["enabled"] = True
     await asyncio.to_thread(ground_turns.observe, turn)
@@ -366,7 +362,7 @@ async def _show_station_stats(update, state, index):
     lines.extend(("", "ПРОБЛЕМЫ И РИСКИ"))
     try:
         result = await interpret_station(report)
-    except Exception:  # noqa: BLE001 -- optional insights must not block statistics
+    except Exception:
         lines.append("Анализ заметок сейчас недоступен. Тайминги показаны выше.")
     else:
         if result is None or not (result.frequent or result.critical):
@@ -572,7 +568,6 @@ def deactivate_ground(context):
 
 
 async def handle_ground_text(update, context):
-    """Record natural-language input against the selected or explicit Leon flight."""
     require_user(update)
     message = update.effective_message
     text = (message.text or "").strip()
@@ -589,8 +584,6 @@ async def handle_ground_text(update, context):
         _, records = await parse_ground_input(
             text, (update.effective_chat.id, update.effective_user.id)
         )
-        # Only a flight number explicitly placed at the start of the message
-        # can override the selected card. Never trust an inferred model ID.
 
         if not state or (explicit and not state.get("cards")):
             snapshot = await load_ground_flights()
@@ -616,7 +609,6 @@ async def handle_ground_text(update, context):
                 )
             ]
             if not matches:
-                # Source may have been refreshed since the last visit.
                 snapshot = await load_ground_flights(refresh=True)
                 state["cards"] = snapshot["cards"]
                 state["snapshot"] = snapshot
@@ -667,7 +659,6 @@ async def handle_ground_text(update, context):
         )
         return
 
-    # Keep operator chats clean, but never delete input before the write completes.
     with suppress(AttributeError, TelegramError):
         await context.bot.delete_message(
             chat_id=update.effective_chat.id, message_id=message.message_id

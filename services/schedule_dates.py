@@ -1,5 +1,3 @@
-"""Deterministic UTC calendar periods for schedule requests."""
-
 import calendar
 import re
 from dataclasses import dataclass
@@ -43,7 +41,7 @@ DATE_PATTERN = re.compile(
 @dataclass(frozen=True)
 class SchedulePeriod:
     start: date
-    end: date  # Inclusive calendar date.
+    end: date
 
     def __post_init__(self):
         if self.end < self.start:
@@ -67,11 +65,9 @@ def _parse_day(value: str, year: int) -> date:
 def parse_schedule_period(
     text: str, *, today: date | None = None
 ) -> SchedulePeriod | None:
-    """Return a bounded period; reject invalid or ambiguous range expressions."""
     today = today or datetime.now(UTC).date()
     text = text.lower().replace("ё", "е")
     try:
-        # Shared month: 'с 16 по 30 ноября', '16–30 ноября 2026'.
         shared = re.search(
             rf"\b(?:с\s+)?(\d{{1,2}})\s*(?:по|до|[-–—])\s*"
             rf"(\d{{1,2}})\s+({MONTH_PATTERN})(?:\s+(20\d{{2}}))?\b",
@@ -89,7 +85,6 @@ def parse_schedule_period(
         if dates:
             if len(dates) > 2:
                 raise ValueError("Укажите одну дату или один диапазон дат.")
-            # A year at the end applies to both named dates unless explicitly supplied.
             years = re.findall(r"\b20\d{2}\b", text)
             year = int(years[-1]) if years else today.year
             days = [_parse_day(match.group(), year) for match in dates]

@@ -1,5 +1,3 @@
-"""ForeFlight snapshot components with independently reported errors."""
-
 import asyncio
 from urllib.parse import urlsplit
 
@@ -23,7 +21,6 @@ async def load_foreflight(
         row, basis = match or await find_flight(
             client, flight["flightNumber"], day, flight
         )
-        # A callsign alone must not silently attach another leg's briefing.
         for left, right in (
             (flight.get("departure"), row.get("departure")),
             (flight.get("arrival"), row.get("destination")),
@@ -181,7 +178,7 @@ async def load_foreflight(
                 )
         block.text = "\n".join(lines)
         blocks["notams"] = block
-    except Exception as exc:  # noqa: BLE001 -- partial source boundary; no signed URLs in errors
+    except Exception as exc:
         blocks["notams"] = SourceBlock(
             "ForeFlight briefing",
             f"NOTAM: извлечение недоступно ({type(exc).__name__}); откройте /briefing.",

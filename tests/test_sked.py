@@ -1,5 +1,3 @@
-"""SKED session/navigation and source-field regressions; all APIs mocked."""
-
 from datetime import date
 from time import monotonic
 from types import SimpleNamespace
@@ -113,7 +111,6 @@ async def test_session_toggles_survive_card_details_and_back(
     assert "TAS 1700 LT" in text
     load.assert_not_awaited()
     model.assert_not_awaited()
-    # A fresh SKED must not inherit another screen's preferences.
     query = AsyncMock(return_value={"flights": [], "complete": True})
     monkeypatch.setattr(browser, "get_flight_schedule", query)
     await browser.show_week(update(), session, today=date(2026, 11, 13))
