@@ -1,5 +1,3 @@
-"""Staff-only private note workflow. Never post the notes database into a group."""
-
 import asyncio
 import re
 from datetime import UTC, datetime
@@ -196,7 +194,6 @@ async def private_callback(update, context):
             if action == "add" and re.fullmatch(r"[A-Z]{4}", value):
                 draft["station"] = value
             elif action == "edit" and value.isdigit() and version.isdigit():
-                # Read the exact owned record; list results alone are insufficient authorization.
                 with notes.connect() as conn:
                     row = conn.execute(
                         "SELECT * FROM station_notes WHERE id=? AND author_id=? AND status='active'",

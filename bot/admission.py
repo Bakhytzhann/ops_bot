@@ -1,5 +1,3 @@
-"""Admission screens and administrator decisions, private Telegram chats only."""
-
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup

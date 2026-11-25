@@ -1,5 +1,3 @@
-"""One temporal classification for the card, NOTAM lists and record navigation."""
-
 from services.briefing_notams import applicability
 from services.snapshot_models import utc
 

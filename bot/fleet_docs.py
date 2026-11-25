@@ -1,5 +1,3 @@
-"""Fleet document navigation; approved files are not yet configured."""
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 DOCUMENT_CATEGORIES = {

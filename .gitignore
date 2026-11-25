@@ -1,17 +1,28 @@
 .env
 .env.*
 !.env.example
+.envrc
+.npmrc
 .venv/
+venv/
+node_modules/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.cache/
 logs/
+*.log
 data/
+flight-data/
+exports/
 *.db
 *.sqlite3
 *.sqlite
 *.db-*
+*.sqlite-*
+*.sqlite3-*
 *.sqlite3-*
 .coverage
 .coverage.*
@@ -26,9 +37,12 @@ Thumbs.db
 .DS_Store
 *.pem
 *.key
+*.p12
+*.pfx
+*.secret
+*.token
+credentials.json
+secrets/
 
-# Legacy local documentation and temporary artifacts
-README.md
-docs/
 *.tmp
 *.bak

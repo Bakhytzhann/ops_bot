@@ -1,19 +1,22 @@
-"""Persistent Telegram admission; never imported by operational services."""
-
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from config.settings import settings
+from config.settings import get_settings
 
 
 class AccessStore:
-    def __init__(self, path=None):
+    def __init__(self, path=None, *, configuration=None):
         self.path = path
+        self.configuration = configuration
+
+    @property
+    def settings(self):
+        return get_settings() if self.configuration is None else self.configuration
 
     @contextmanager
     def connect(self):
-        path = self.path or settings.database_path
+        path = self.path or self.settings.database_path
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, timeout=10)
         conn.row_factory = sqlite3.Row
@@ -33,7 +36,7 @@ class AccessStore:
                 now = datetime.now(UTC).isoformat()
                 conn.executemany(
                     "INSERT OR IGNORE INTO bot_access(user_id,status,updated_at) VALUES(?,'approved',?)",
-                    [(user, now) for user in settings.allowed_user_ids],
+                    [(user, now) for user in self.settings.allowed_user_ids],
                 )
                 yield conn
         finally:
@@ -47,7 +50,7 @@ class AccessStore:
             return dict(row) if row else None
 
     def is_allowed(self, user_id):
-        if user_id in settings.admin_ids:
+        if user_id in self.settings.admin_ids:
             return True
         record = self.get(user_id)
         return record is not None and record["status"] == "approved"
@@ -76,9 +79,9 @@ class AccessStore:
             return {**record, "resubmitted": resubmitted}
 
     def decide(self, actor, user_id, action, revision):
-        if actor not in settings.admin_ids:
+        if actor not in self.settings.admin_ids:
             raise PermissionError("Administrator required")
-        if user_id in settings.admin_ids:
+        if user_id in self.settings.admin_ids:
             raise ValueError("Administrators are managed through TELEGRAM_ADMIN_IDS")
         if action not in {"approve", "reject", "revoke"}:
             raise ValueError("Unknown access decision")

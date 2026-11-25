@@ -24,7 +24,6 @@ class FlightAgent:
         self._inference_slots = asyncio.Semaphore(settings.ollama_max_parallel)
 
     async def warmup(self):
-        """Load the model before the first user request without generating text."""
         async with self._inference_slots:
             await self.client.generate(
                 model=self.model,

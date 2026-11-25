@@ -1,5 +1,3 @@
-"""Shared SKED sessions and Flight Cards scoped to the originating chat/topic."""
-
 import re
 from datetime import UTC, datetime, timedelta
 from secrets import token_hex
@@ -103,66 +101,115 @@ def render_page(token, listing, page=0):
         raise ValueError("Страница списка не найдена. Откройте SKED.")
     listing["page"] = page
     start = page * PAGE_SIZE
+    lines = [
+        "SKED · " + schedule_heading(listing["start"], listing["end"]),
+        "Режим: " + ("LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"),
+        "",
+    ]
+    previous_day = None
+    for index, flight in enumerate(flights[start : start + PAGE_SIZE], start):
+        day = flight_date(flight, preferences)
+        if day != previous_day:
+            if previous_day is not None:
+                lines.append("")
+            lines.append(day)
+            previous_day = day
+        lines.append(f"{index + 1}. {flight_label(flight, preferences)}")
+    if not flights:
+        lines.append("нет рейсов" if listing["complete"] else "нет данных")
+    if not listing["complete"]:
+        lines.append("Расписание неполное: нет данных по части рейсов.")
+    lines.extend(("", f"Введите номер рейса · Страница {page + 1}/{pages}"))
     rows = []
-    for i, f in enumerate(flights[start : start + PAGE_SIZE], start):
-        rows.append(
-            [
+    if pages > 1:
+        navigation = []
+        if page:
+            navigation.append(
                 InlineKeyboardButton(
-                    flight_label(f, preferences), callback_data=f"fl:{token}:{i}"
+                    "← Страница", callback_data=f"wk:{token}:{page - 1}"
                 )
-            ]
-        )
-    navigation = []
-    if page:
-        navigation.append(
-            InlineKeyboardButton("←", callback_data=f"wk:{token}:{page - 1}")
-        )
-    if page + 1 < pages:
-        navigation.append(
-            InlineKeyboardButton("→", callback_data=f"wk:{token}:{page + 1}")
-        )
-    if navigation:
+            )
+        if page + 1 < pages:
+            navigation.append(
+                InlineKeyboardButton(
+                    "Страница →", callback_data=f"wk:{token}:{page + 1}"
+                )
+            )
         rows.append(navigation)
     rows.append(
         [
-            InlineKeyboardButton(
-                "UTC · ICAO" if preferences.get("time") == "LT" else "LT · IATA",
-                callback_data=f"sv:{token}:view",
+            InlineKeyboardButton("← 7 дней", callback_data=f"sk:{token}:prev"),
+            InlineKeyboardButton("7 дней →", callback_data=f"sk:{token}:next"),
+        ]
+    )
+    rows.append(preference_buttons(token, preferences))
+    rows.append(
+        [InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh")]
+    )
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def selected_schedule(context, update):
+    scope = _scope(update)
+    token = (context.user_data.get("active_sked") or {}).get(scope)
+    listing = _cache(context).get(token)
+    if not listing or listing["scope"] != scope:
+        return None, None
+    return token, listing
+
+
+def accepts_sked_number(update, context):
+    text = str(getattr(update.effective_message, "text", "") or "").strip()
+    if not re.fullmatch(r"[1-9]\d{0,3}", text):
+        return False
+    _, listing = selected_schedule(context, update)
+    return bool(listing)
+
+
+async def select_sked_number(update, context):
+    from types import SimpleNamespace
+
+    require_user(update)
+    token, listing = selected_schedule(context, update)
+    text = str(update.effective_message.text or "").strip()
+    if not listing or not re.fullmatch(r"[1-9]\d{0,3}", text):
+        raise ValueError("Откройте SKED и введите номер рейса из списка.")
+    position = int(text) - 1
+    if position >= len(listing["flights"]):
+        raise ValueError("Рейс не найден в текущем списке.")
+    callback = SimpleNamespace(
+        data=f"fl:{token}:{position}",
+        answer=lambda **kwargs: None,
+        edit_message_text=update.effective_message.reply_text,
+    )
+    proxy = SimpleNamespace(
+        callback_query=callback,
+        effective_user=update.effective_user,
+        effective_chat=update.effective_chat,
+        effective_message=update.effective_message,
+        main_screen=getattr(update, "main_screen", None),
+    )
+    await handle_selection(proxy, context)
+    screen = getattr(update, "main_screen", None)
+    if screen is not None and screen.generation != context.user_data.get(
+        "screen_generation", 0
+    ):
+        return
+    bot = getattr(context, "bot", None)
+    if bot is not None and getattr(update.effective_message, "message_id", None):
+        from contextlib import suppress
+
+        from telegram.error import TelegramError
+
+        with suppress(TelegramError, AttributeError):
+            await bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=update.effective_message.message_id,
             )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton("7 дней", callback_data=f"sk:{token}:7"),
-            InlineKeyboardButton("30 дней", callback_data=f"sk:{token}:30"),
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton("↻ Обновить", callback_data=f"sk:{token}:refresh"),
-        ]
-    )
-    state = (
-        "Выберите рейс"
-        if flights
-        else "нет рейсов"
-        if listing["complete"]
-        else "нет данных"
-    )
-    text = (
-        f"{'Поиск: ' if listing.get('search') else ''}{schedule_heading(listing['start'], listing['end'])}\n"
-        f"{state} · Страница {page + 1}/{pages}"
-    )
-    if not listing["complete"]:
-        text += "\nРасписание неполное: нет данных по части рейсов."
-    text += "\nРежим: " + (
-        "LT / IATA" if preferences.get("time") == "LT" else "UTC / ICAO"
-    )
-    return text, InlineKeyboardMarkup(rows)
 
 
 async def show_week(
-    update, context, *, today=None, search=None, days=3, preferences=None, edit=False
+    update, context, *, today=None, search=None, days=7, preferences=None, edit=False
 ):
     require_user(update)
     today = today or datetime.now(UTC).date()
@@ -186,7 +233,7 @@ async def show_week(
         result = await get_flight_schedule(today.isoformat(), end.isoformat())
     except PermissionError:
         raise
-    except Exception:  # noqa: BLE001 -- failed source is distinct from an empty schedule
+    except Exception:
         result = {"flights": [], "complete": False}
     valid = [
         f
@@ -235,6 +282,7 @@ async def show_week(
         "search": term,
         "preferences": dict(preferences or {}),
     }
+    context.user_data.setdefault("active_sked", {})[_scope(update)] = token
     cache[token] = listing
     text, markup = render_page(token, listing)
     if edit:
@@ -297,13 +345,15 @@ async def handle_selection(update, context):
             text, markup = render_page(token, listing, listing.get("page", 0))
             await edit_message_text(query, text, reply_markup=markup)
         else:
-            if position not in {"7", "30", "refresh"}:
+            if position not in {"prev", "next", "refresh"}:
                 raise ValueError("Неизвестный период SKED.")
             start = datetime.fromisoformat(listing["start"]).date()
             end = datetime.fromisoformat(listing["end"]).date()
-            days = (end - start).days + 1 if position == "refresh" else int(position)
-            if position != "refresh":
-                start = end + timedelta(days=1)
+            days = (end - start).days + 1
+            if position == "next":
+                start = start + timedelta(days=7)
+            elif position == "prev":
+                start = start - timedelta(days=7)
             search = listing.get("search")
             await show_week(
                 update,
@@ -345,6 +395,7 @@ async def handle_selection(update, context):
                 "view",
                 "time",
                 "codes",
+                *PREPARATION,
             }
         ):
             raise ValueError("Неизвестное действие карточки.")
@@ -355,6 +406,17 @@ async def handle_selection(update, context):
             action = listing.get("action", "card")
         snapshots = listing.setdefault("snapshots", {})
         snapshot = snapshots.get(position)
+        if kind == "fl" or snapshot is None or action == "refresh":
+            basic = listing["flights"][position]
+            await edit_message_text(
+                query,
+                "FLIGHT CARD · "
+                + flight_label(basic, preferences)
+                + "\n\nLeon schedule · получено\n"
+                "Экипаж, расчётное время и METAR · загружаются…",
+                disable_web_page_preview=True,
+            )
+
         if kind == "fl" or snapshot is None or action == "refresh":
             progress_lock = asyncio.Lock()
             last_progress = [""]
@@ -378,7 +440,8 @@ async def handle_selection(update, context):
             snapshot = await load_flight_snapshot(
                 listing["flights"][position],
                 refresh=action == "refresh",
-                on_update=None if getattr(update, "main_screen", None) else progress,
+                on_update=progress,
+                from_sked=True,
             )
             if position in snapshots:
                 listing.setdefault("previous", {})[position] = snapshots[position]
@@ -432,11 +495,73 @@ async def handle_selection(update, context):
                 )
             if listing["screen_revision"] != revision:
                 return
+        if action in {"prepnotams", "prepbriefing"} and not snapshot.blocks.get(
+            "briefing"
+        ):
+            from services.flight_foreflight import load_foreflight
+
+            await edit_message_text(
+                query,
+                "ПОДГОТОВКА · "
+                + flight_reference(snapshot.flight, preferences)
+                + "\nForeFlight briefing / NOTAM · загружаются…",
+            )
+            try:
+                snapshot.blocks.update(await load_foreflight(snapshot.flight))
+            except Exception:
+                snapshot.blocks["notams"] = SourceBlock(
+                    "ForeFlight", "Брифинг/NOTAM сейчас недоступны."
+                )
+        if action == "prepwx" and not snapshot.blocks.get("weather_taf"):
+            from services.operational_routes import selected_flight_weather
+
+            await edit_message_text(
+                query,
+                "ПОДГОТОВКА · "
+                + flight_reference(snapshot.flight, preferences)
+                + "\nMETAR / TAF · загружаются…",
+            )
+            try:
+                result = await selected_flight_weather(
+                    snapshot.flight,
+                    snapshot.flight["departureUTC"][:10],
+                    include_taf=True,
+                )
+                snapshot.blocks["weather_taf"] = SourceBlock(
+                    "Leon / AWC",
+                    result.get("answer") or "",
+                    "ready",
+                    details={"reports": list(result.get("reports", []))},
+                )
+            except Exception:
+                snapshot.blocks["weather_taf"] = SourceBlock(
+                    "Leon / AWC", "TAF: источник недоступен."
+                )
+        if listing["screen_revision"] != revision:
+            return
         if action in {"notams", "dep", "arr"}:
             action = "nlA_A" if action == "arr" else "nlD_A"
         listing["action"] = action
         page = int(page)
-        if valid_action(action):
+        if action in PREPARATION:
+            text = preparation_text(snapshot, action, preferences)
+            pages = [text[i : i + 3800] for i in range(0, len(text), 3800)] or [
+                "нет данных"
+            ]
+            if page >= len(pages):
+                raise ValueError("Страница подготовки не найдена.")
+            text = pages[page]
+            markup = card_keyboard(
+                snapshot, token, position, action, page, len(pages), preferences
+            )
+            if action == "prepbriefing":
+                block = snapshot.blocks.get("briefing")
+                url = block.details.get("url") if block else None
+                if url:
+                    rows = list(markup.inline_keyboard)
+                    rows.insert(0, [InlineKeyboardButton("Открыть Briefing", url=url)])
+                    markup = InlineKeyboardMarkup(rows)
+        elif valid_action(action):
             text, markup = render_notams(
                 snapshot, token, position, action, page, preferences
             )
@@ -451,7 +576,6 @@ async def handle_selection(update, context):
             markup = card_keyboard(
                 snapshot, token, position, action, page, len(pages), preferences
             )
-        # Telegram rejects identical edits; avoid unnecessary errors on repeated taps.
         if (
             getattr(update.effective_message, "text", None) != text
             or getattr(update.effective_message, "reply_markup", None) != markup
@@ -506,35 +630,103 @@ def card_keyboard(
             label, callback_data=f"fc:{token}:{position}:{target}:{number}"
         )
 
-    rows = [
-        [button("DUTY / REST", "duty"), button("WX / TAF", "weather")],
-        [button("RTE / ALTN", "route"), button("NOTAM", "notams")],
-        preference_buttons(token, preferences or {}, position=position)
-        + [
-            InlineKeyboardButton(
-                "Briefing", url=snapshot.blocks["briefing"].details["url"]
-            )
-            if snapshot.blocks.get("briefing")
-            and snapshot.blocks["briefing"].details.get("url")
-            else button("Briefing", "briefing")
-        ],
-    ]
-    if pages > 1:
-        rows.append(
-            ([button("←", action, page - 1)] if page else [])
-            + ([button("→", action, page + 1)] if page + 1 < pages else [])
-        )
-    if action not in {"card", "refresh"}:
-        rows.append([button("← К рейсу", "card")])
-    rows.append(
-        [
-            button("REFRESH", "refresh"),
-            InlineKeyboardButton(
-                "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
+    if action.startswith("prep"):
+        rows = [
+            [button("CREW / FDP", "prepcrew"), button("WX / TAF", "prepwx")],
+            [button("NOTAM", "prepnotams"), button("Briefing", "prepbriefing")],
+            *(
+                [[button("DEP NOTAM", "nlD_A"), button("ARR NOTAM", "nlA_A")]]
+                if snapshot.blocks.get("briefing")
+                else []
             ),
+            preference_buttons(token, preferences or {}, position=position),
+            [button("← К рейсу", "card")],
         ]
-    )
+    else:
+        rows = [
+            [button("Подготовка", "prep"), button("REFRESH", "refresh")],
+            preference_buttons(token, preferences or {}, position=position)
+            + [
+                InlineKeyboardButton(
+                    "← К списку", callback_data=f"wk:{token}:{position // PAGE_SIZE}"
+                )
+            ],
+        ]
+    if pages > 1:
+        rows.insert(
+            0,
+            [
+                *([button("←", action, page - 1)] if page else []),
+                *([button("→", action, page + 1)] if page + 1 < pages else []),
+            ],
+        )
     return InlineKeyboardMarkup(rows)
+
+
+PREPARATION = {"prep", "prepcrew", "prepwx", "prepnotams", "prepbriefing"}
+
+
+def preparation_text(snapshot, action, preferences=None):
+    heading = flight_reference(snapshot.flight, preferences)
+    if action == "prep":
+        return (
+            heading + "\n\nПОДГОТОВКА\n"
+            "Открывайте только нужный раздел. Загрузка брифинга по запросу.\n\n"
+            "CREW / FDP · индивидуальные расчёты Leon\n"
+            "WX / TAF · METAR и прогнозы\n"
+            "NOTAM · по брифингу ForeFlight\n"
+            "Briefing · отдельный документ ForeFlight"
+        )
+    if action == "prepcrew":
+        crew = snapshot.blocks.get("crew")
+        duty = snapshot.blocks.get("duty")
+        return (
+            heading
+            + "\n\nCREW / FDP / DUTY / REST\n"
+            + (crew.text if crew else "Экипаж: нет данных")
+            + "\n\n"
+            + (duty.text if duty else "Duty / Rest: нет данных")
+            + "\n\nHOTEL: "
+            + (
+                " | ".join(
+                    f"{item['position']}: {item['name']}"
+                    for item in crew.details.get("hotels", [])
+                )
+                if crew and crew.details.get("hotels")
+                else "не указан в доступных данных Leon."
+            )
+        )
+    if action == "prepwx":
+        from services.flight_weather import full_weather
+
+        original = snapshot.blocks.get("weather")
+        if snapshot.blocks.get("weather_taf"):
+            snapshot.blocks["weather"] = snapshot.blocks["weather_taf"]
+        try:
+            return heading + "\n\nWX / TAF\n" + full_weather(snapshot, preferences)
+        finally:
+            if original is None:
+                snapshot.blocks.pop("weather", None)
+            else:
+                snapshot.blocks["weather"] = original
+    if action == "prepnotams":
+        block = snapshot.blocks.get("notams")
+        return (
+            heading + "\n\nNOTAM\n" + (block.text if block else "Брифинг не загружен.")
+        )
+    if action == "prepbriefing":
+        block = snapshot.blocks.get("briefing")
+        url = block.details.get("url") if block else None
+        return (
+            heading
+            + "\n\nBRIEFING\n"
+            + (
+                "ForeFlight: ссылка получена. Откройте её кнопкой ниже."
+                if url
+                else "Ссылка на брифинг недоступна."
+            )
+        )
+    raise ValueError("Неизвестный раздел подготовки.")
 
 
 def card_detail(snapshot, action, preferences=None):

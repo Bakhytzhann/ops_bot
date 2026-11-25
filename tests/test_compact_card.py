@@ -1,5 +1,3 @@
-"""Compact UI and Leon seconds/reporting regressions using verified response shapes."""
-
 from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -114,55 +112,50 @@ def test_card_is_compact_without_repeated_source_boilerplate(card):
     for value in (
         "ABC1265 TEST 13NOV",
         "UAAA 0030z 0200z UGTB",
-        "Расчетное 01:30 · CREW VVI/YMA/RZA",
-        "UAAA (LEON) METAR 130000Z",
-        "METAR 130000Z 00000KT 9999 SCT020 10/05 Q1015",
+        "ETE 01:30",
+        "CREW VVI/YMA/RZA",
+        "WX · CURRENT METAR",
         "Пролеты: нет данных",
-        "ALTN: UACC (—/—/—)",
-        "UAAA (1/1/",
+        "NOTAM · Подготовка (по запросу)",
+        "CAT I · ПАМЯТКА",
     ):
         assert value in text
     for value in (
-        "DUTY",
-        "ForeFlight",
+        "FULL METAR/TAF",
+        "ForeFlight briefing",
         "Источник",
         "Обновлено",
-        "FULL METAR/TAF",
-        "Факт",
-        "block time",
-        "взлёт",
+        "crewMemberNid",
     ):
         assert value not in text
-    assert text.count("ABC1265") == 1 and text.count("13NOV") == 1
-    assert "crewMemberNid" not in text
+    assert text.count("ABC1265") == 1
 
 
 def test_card_buttons_exact_and_switch_directions(card):
     markup = ui.card_keyboard(card, "token", 0)
     assert [[b.text for b in row] for row in markup.inline_keyboard] == [
-        ["DUTY / REST", "WX / TAF"],
-        ["RTE / ALTN", "NOTAM"],
-        ["LT · IATA", "Briefing"],
-        ["REFRESH", "← К списку"],
+        ["Подготовка", "REFRESH"],
+        ["LT · IATA", "← К списку"],
     ]
+    prep = ui.card_keyboard(card, "token", 0, action="prep")
+    assert any(
+        button.text == "Briefing" for row in prep.inline_keyboard for button in row
+    )
     buttons = ui.preference_buttons("token", {"time": "LT", "codes": "IATA"})
     assert [b.text for b in buttons] == ["UTC · ICAO"]
 
 
-def test_sked_dates_inside_flight_buttons_only(card):
+def test_sked_dates_appear_in_numbered_message_not_buttons(card):
     listing = {
         "flights": [card.flight],
         "start": "2026-11-13",
-        "end": "2026-11-15",
+        "end": "2026-11-19",
         "complete": True,
     }
-    _, markup = ui.render_page("token", listing)
-    assert markup.inline_keyboard[0][0].text == "ABC1265 13NOV UAAA 0030z 0200z UGTB"
+    text, markup = ui.render_page("token", listing)
+    assert "1. ABC1265 13NOV UAAA 0030z 0200z UGTB" in text
     assert not any(
-        b.text == "2026-11-13" for row in markup.inline_keyboard for b in row
-    )
-    assert not any(
-        b.callback_data.startswith("wk:") for row in markup.inline_keyboard for b in row
+        b.callback_data.startswith("fl:") for row in markup.inline_keyboard for b in row
     )
     card.flight["departureLocal"] = "2026-11-14T00:30:00"
     assert "14NOV ALA 0030 LT" in ui.flight_label(
@@ -184,7 +177,7 @@ def test_eet_never_uses_actual_or_block_time():
 def test_local_card_and_midnight_offset(card):
     text = render_snapshot(card, {"time": "LT", "codes": "IATA"})
     assert "ALA 0530 LT 0600 LT UGTB (ICAO)" in text
-    assert "UACC (ICAO)" in text
+    assert "UACC (ICAO)" not in text
     card.flight["arrivalUTC"] = "2026-11-14T02:00:00Z"
     assert "0200z (+1d)" in flight_header(card.flight)
 
@@ -302,11 +295,8 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
         )
         monkeypatch.setattr(ui, "load_flight_snapshot", AsyncMock(return_value=card))
         for action, page in (
-            ("duty", 0),
-            ("weather", 0),
-            ("weather", 1),
-            ("route", 0),
-            ("notams", 0),
+            ("prep", 0),
+            ("prepcrew", 0),
             ("card", 0),
             ("refresh", 0),
         ):
@@ -319,7 +309,7 @@ async def test_details_refresh_and_back_edit_same_message(card, monkeypatch):
             buttons = u.callback_query.edit_message_text.call_args.kwargs[
                 "reply_markup"
             ].inline_keyboard
-            if action not in {"card", "refresh"}:
+            if action in {"prep", "prepcrew"}:
                 assert any(
                     b.callback_data == "fc:token:0:card:0"
                     for row in buttons

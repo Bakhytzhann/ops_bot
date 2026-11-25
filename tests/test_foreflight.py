@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+import json
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -123,6 +124,88 @@ async def test_mutation_endpoints_blocked(config):
         ):
             with pytest.raises((ValueError, PermissionError)):
                 await client._get(path)
+
+
+@pytest.mark.asyncio
+async def test_calculate_routed_performance_only(config):
+    requests = []
+
+    def respond(request):
+        requests.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={"performance": {}})
+
+    departure = datetime(2026, 11, 24, 15, tzinfo=timezone(timedelta(hours=5)))
+    async with ForeFlightClient(
+        config, transport=httpx.MockTransport(respond)
+    ) as client:
+        args = ("UAAA", "UACC", departure, "UP-TEST", 2)
+        await client.calculate_route_performance(
+            *args,
+            " uaaa  DOGAR A231 PRISU uacc ",
+            flight_level=390,
+        )
+        for route in ("DCT", "UAAA DCT UACC", "N0450F400 DCT"):
+            with pytest.raises(ValueError, match="explicit enroute routing"):
+                await client.calculate_route_performance(*args, route)
+
+    assert requests == [
+        (
+            "POST",
+            "/public/api/Flights/performance",
+            {
+                "flight": {
+                    "departure": "UAAA",
+                    "destination": "UACC",
+                    "scheduledTimeOfDeparture": "2026-11-24T10:00:00Z",
+                    "aircraftRegistration": "UP-TEST",
+                    "routeToDestination": {
+                        "route": "DOGAR A231 PRISU",
+                        "altitude": {"altitude": 390, "unit": "FL"},
+                    },
+                    "load": {"passengers": [{"type": "Adult"}, {"type": "Adult"}]},
+                    "windOptions": {"windModel": "Forecasted"},
+                    "flightRule": "IFR",
+                    "atcTypeOfFlight": "N",
+                }
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_autoroute_deletes_only_its_draft(config):
+    requests = []
+
+    def respond(request):
+        requests.append((request.method, request.url.path))
+        if request.method == "POST":
+            flight = json.loads(request.content)["flight"]
+            assert "crew" not in flight
+            assert "routeToDestination" not in flight
+            assert len(flight["tags"]) == 1
+            return httpx.Response(200, json={"flight": {"flightId": FLIGHT_ID}})
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "flightData": {"routeToDestination": {"route": "DOGAR A231 PRISU"}}
+                },
+            )
+        return httpx.Response(200, text="Flight deleted successfully")
+
+    async with ForeFlightClient(
+        config, transport=httpx.MockTransport(respond)
+    ) as client:
+        calculated = await client.calculate_autorouted_performance(
+            "UAAA", "UACC", datetime(2026, 11, 30, tzinfo=UTC), "UP-TEST", 3
+        )
+
+    assert calculated["flightData"]["routeToDestination"]["route"] == "DOGAR A231 PRISU"
+    assert requests == [
+        ("POST", "/public/api/Flights"),
+        ("GET", f"/public/api/Flights/{FLIGHT_ID}/performance"),
+        ("DELETE", f"/public/api/Flights/{FLIGHT_ID}"),
+    ]
 
 
 @pytest.mark.asyncio

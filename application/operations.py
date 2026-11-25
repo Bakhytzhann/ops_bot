@@ -1,5 +1,3 @@
-"""Operational inputs and results, without caller identity."""
-
 from dataclasses import dataclass
 
 from integrations.awc.client import get_weather
@@ -22,8 +20,11 @@ async def flight_schedule(date, end_date=None):
     return await get_flight_schedule(date, end_date)
 
 
-async def prepare_flight(selected, *, refresh=False, on_update=None):
-    return await load_flight_snapshot(selected, refresh=refresh, on_update=on_update)
+async def prepare_flight(selected, *, refresh=False, on_update=None, from_sked=False):
+    options = {"refresh": refresh, "on_update": on_update}
+    if from_sked:
+        options["from_sked"] = True
+    return await load_flight_snapshot(selected, **options)
 
 
 async def preparation_by_number(number, day):

@@ -1,5 +1,3 @@
-"""Station roles and source-faithful weather for DEP, ARR and unique alternates."""
-
 import asyncio
 import re
 
@@ -67,6 +65,9 @@ def grouped_reports(reports, station, product):
             continue
         key = " ".join(raw.split())
         entry = grouped.setdefault(key, {**report, "sources": []})
+        for field in ("issued_at", "valid_from", "valid_to"):
+            if not entry.get(field) and report.get(field):
+                entry[field] = report[field]
         source = str(report.get("source") or "").replace("Leon MCP", "Leon")
         if source and source not in entry["sources"]:
             entry["sources"].append(source)
@@ -166,14 +167,11 @@ def full_weather(snapshot, preferences=None):
                     product
                     + (" · " + " / ".join(entry["sources"]) if shared is None else "")
                 )
-                # Raw METAR carries observation time, raw TAF carries issue/validity.
                 raw = entry["raw"]
-                if (
+                if entry.get("metadata") and (
                     not metar_stamp(raw)
-                    and entry.get("metadata")
                     or product == "TAF"
                     and not re.search(r"\b\d{4}/\d{4}\b", raw)
-                    and entry.get("metadata")
                 ):
                     lines.append(entry["metadata"])
                 lines.append(raw)

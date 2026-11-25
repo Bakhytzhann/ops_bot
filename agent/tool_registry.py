@@ -84,7 +84,7 @@ class ToolRegistry:
                 "data": result,
             }
 
-        except Exception as exc:  # noqa: BLE001 -- isolate arbitrary tool failures; return only the error type
+        except Exception as exc:
             return {
                 "ok": False,
                 "error": type(exc).__name__,

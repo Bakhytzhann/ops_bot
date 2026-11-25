@@ -1,5 +1,3 @@
-"""Instructions for the conversational model; live operations run in Python."""
-
 MODEL_TOOL_NAMES = {"get_current_time"}
 
 SYSTEM_PROMPT = """

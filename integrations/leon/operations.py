@@ -1,5 +1,3 @@
-"""Read-only operational workflows using verified Leon MCP schemas."""
-
 import re
 from datetime import date
 
@@ -8,7 +6,6 @@ from services.schedule_dates import SchedulePeriod
 
 
 def records(data):
-    """Accept a single record or a list, rejecting server error payloads."""
     if isinstance(data, dict):
         if data.get("error") or data.get("errors"):
             raise RuntimeError("Leon returned an error response")
@@ -148,7 +145,7 @@ async def get_crew_operations(
         name = "get-crew-ftl-sheet" if mode == "ftl" else "get-crew-ftl-violations"
         arguments = {"crewMember": member["loginNid"], "timeInterval": interval}
     data = await call_leon(name, arguments)
-    records(data)  # Reject malformed/error responses before formatting.
+    records(data)
     return {
         "source": "Leon MCP",
         "crew": member,

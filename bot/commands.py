@@ -1,5 +1,3 @@
-"""Telegram catalog; operational execution belongs to application/."""
-
 from dataclasses import dataclass
 
 from application.commands import execute_operation

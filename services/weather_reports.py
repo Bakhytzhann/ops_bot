@@ -1,5 +1,3 @@
-"""Compact raw-weather presentation, with deduplicated source attribution."""
-
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -45,6 +43,37 @@ def _time(value):
     return str(value) if value is not None else "—"
 
 
+def report_time(value):
+    try:
+        return utc(_time(value))
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def taf_issue(raw, start, end):
+    if not isinstance(raw, str) or not start or not end or end < start:
+        return None
+    match = re.match(
+        r"^\s*(?:TAF\s+)?(?:(?:AMD|COR)\s+)?[A-Z]{4}\s+(\d{2})(\d{2})(\d{2})Z\b",
+        raw,
+    )
+    if not match:
+        return None
+    lower = start - timedelta(days=1)
+    candidates = set()
+    day, hour, minute = map(int, match.groups())
+    for anchor in (lower, start, end):
+        try:
+            value = anchor.replace(
+                day=day, hour=hour, minute=minute, second=0, microsecond=0
+            )
+        except ValueError:
+            continue
+        if lower <= value <= end:
+            candidates.add(value)
+    return candidates.pop() if len(candidates) == 1 else None
+
+
 def leon_reports(data, include_taf=False):
     reports = []
     for item in data:
@@ -55,6 +84,10 @@ def leon_reports(data, include_taf=False):
                 value = item.get(product + suffix)
                 if isinstance(value, dict):
                     raw = value.get("rawText")
+                    issued = value.get(
+                        "observationTime" if product == "metar" else "issueTime"
+                    )
+                    valid_from, valid_to = value.get("validFrom"), value.get("validTo")
                     metadata = (
                         f"Наблюдение: {value.get('observationTime') or '—'}"
                         if product == "metar"
@@ -62,6 +95,10 @@ def leon_reports(data, include_taf=False):
                     )
                 else:
                     raw, metadata = value, ""
+                    issued = valid_from = valid_to = None
+                issued_at, start, end = map(report_time, (issued, valid_from, valid_to))
+                if product == "taf" and not issued_at:
+                    issued_at = taf_issue(raw, start, end)
                 reports.append(
                     {
                         "source": "Leon MCP",
@@ -69,6 +106,9 @@ def leon_reports(data, include_taf=False):
                         "product": product.upper(),
                         "raw": raw,
                         "metadata": metadata,
+                        "issued_at": issued_at,
+                        "valid_from": start,
+                        "valid_to": end,
                     }
                 )
     return reports
@@ -109,6 +149,11 @@ def awc_reports(result, include_taf=False):
                         "product": kind,
                         "raw": raw,
                         "metadata": metadata,
+                        "issued_at": report_time(
+                            row.get("obsTime" if kind == "METAR" else "issueTime")
+                        ),
+                        "valid_from": report_time(row.get("validTimeFrom")),
+                        "valid_to": report_time(row.get("validTimeTo")),
                     }
                 )
     return reports, errors

@@ -1,5 +1,3 @@
-"""Conservative token decoder. Raw bulletins remain the authoritative output."""
-
 import re
 
 WEATHER = {
@@ -36,7 +34,6 @@ WEATHER = {
 
 
 def summarize_metar(raw: str) -> str:
-    """Four requested observation fields only; never substitute visibility for RVR."""
     body = re.split(r"\b(?:RMK|TEMPO|BECMG|NOSIG)\b", raw, maxsplit=1)[0]
     tokens = body.rstrip("=").split()
     rvrs, clouds, precipitation = [], [], []

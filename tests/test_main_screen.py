@@ -1,5 +1,3 @@
-"""Transient single-screen navigation and callback behavior."""
-
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,7 +6,7 @@ import pytest
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from telegram.error import BadRequest, TimedOut
 
-from bot import admission, bot, flight_browser
+from bot import admission, bot, charter_check, flight_browser, ground_turns, ops_brief
 from bot.keyboards import home_keyboard
 from bot.main_screen import MainScreen, dispatch_screen, text_pages
 from services.snapshot_models import FlightSnapshot
@@ -35,6 +33,7 @@ def screen_context(monkeypatch):
             edit_message_text=AsyncMock(return_value=SimpleNamespace(message_id=102)),
             send_chat_action=AsyncMock(),
             delete_my_commands=AsyncMock(),
+            delete_message=AsyncMock(),
         ),
     )
 
@@ -62,18 +61,40 @@ def test_utf16_pagination():
 async def test_start_installs_keyboard_then_one_editable_screen(screen_context):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
-    assert ctx.bot.send_message.await_count == 2
+    assert ctx.bot.send_message.await_count == 1
     assert (
         ctx.bot.send_message.call_args_list[0].kwargs["reply_markup"] == home_keyboard()
     )
-    screen_id = ctx.user_data["main_screen_message_id"]
+    assert "main_screen_message_id" not in ctx.user_data
     await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
-    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] == screen_id
+    assert (
+        ctx.bot.edit_message_text.call_args.kwargs["message_id"]
+        == ctx.user_data["main_screen_message_id"]
+    )
     assert ctx.bot.send_message.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_all_home_actions_share_screen_without_inline_menu(screen_context):
+async def test_all_home_actions_share_screen_without_inline_menu(
+    screen_context, monkeypatch
+):
+    monkeypatch.setattr(
+        ground_turns,
+        "load_ground_flights",
+        AsyncMock(
+            return_value={
+                "cards": [],
+                "schedule_complete": True,
+                "watch_complete": True,
+            }
+        ),
+    )
+    for module in (ops_brief, charter_check):
+        monkeypatch.setattr(
+            module,
+            "get_flight_schedule",
+            AsyncMock(return_value={"flights": [], "complete": True}),
+        )
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
     for title in (
@@ -90,7 +111,7 @@ async def test_all_home_actions_share_screen_without_inline_menu(screen_context)
             for row in markup.inline_keyboard
             for button in row
         )
-    assert ctx.bot.send_message.await_count == 2
+    assert ctx.bot.send_message.await_count == 6
 
 
 @pytest.mark.asyncio
@@ -129,6 +150,9 @@ async def test_schedule_keeps_previous_context_until_data_arrives(
 
     async def schedule(*args):
         assert ctx.bot.edit_message_text.await_count == before
+        assert (
+            ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        )
         return {"flights": [], "complete": True}
 
     monkeypatch.setattr(flight_browser, "get_flight_schedule", schedule)
@@ -209,8 +233,11 @@ async def test_main_screen_does_not_append_duplicate_menu(screen_context):
 async def test_restart_uses_new_transient_screen(screen_context):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
     old = ctx.user_data["main_screen_message_id"]
     await bot.screen_message_handler(update_for("/start"), ctx)
+    assert "main_screen_message_id" not in ctx.user_data
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
     assert ctx.user_data["main_screen_message_id"] != old
     assert ctx.bot.send_message.await_count == 4
 
@@ -219,6 +246,7 @@ async def test_restart_uses_new_transient_screen(screen_context):
 async def test_deleted_screen_is_recreated_and_timeout_is_not_masked(screen_context):
     ctx = screen_context
     await bot.screen_message_handler(update_for("/start"), ctx)
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
     old = ctx.user_data["main_screen_message_id"]
     ctx.bot.edit_message_text.side_effect = BadRequest("Message to edit not found")
     await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
@@ -365,3 +393,70 @@ async def test_denied_requests_do_not_create_screen(screen_context, monkeypatch)
     await bot.screen_message_handler(update_for("FLEET DOCS"), screen_context)
     screen_context.bot.send_message.assert_not_awaited()
     assert "main_screen_message_id" not in screen_context.user_data
+
+
+@pytest.mark.asyncio
+async def test_home_command_deleted_and_old_content_survives_processing(
+    screen_context, monkeypatch
+):
+    ctx = screen_context
+    await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
+    old_screen = ctx.user_data["main_screen_message_id"]
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args):
+        entered.set()
+        await release.wait()
+        return {"flights": [], "complete": True}
+
+    monkeypatch.setattr(flight_browser, "get_flight_schedule", slow)
+    event = update_for("SKED")
+    event.effective_message.message_id = 42
+    task = asyncio.create_task(bot.screen_message_handler(event, ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert (
+            ctx.bot.send_message.call_args.kwargs["text"] == "SKED · Обработка запроса…"
+        )
+        assert ctx.user_data["last_completed_screen_id"] == old_screen
+        assert not any(
+            call.kwargs.get("message_id") == old_screen
+            for call in ctx.bot.delete_message.await_args_list
+        )
+        assert any(
+            call.kwargs.get("message_id") == 42
+            for call in ctx.bot.delete_message.await_args_list
+        )
+    finally:
+        release.set()
+        await task
+    assert any(
+        call.kwargs.get("message_id") == old_screen
+        for call in ctx.bot.delete_message.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_loading_never_replaces_latest_selection(
+    screen_context, monkeypatch
+):
+    ctx = screen_context
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args):
+        entered.set()
+        await release.wait()
+        return {"flights": [], "complete": True}
+
+    monkeypatch.setattr(flight_browser, "get_flight_schedule", slow)
+    first = asyncio.create_task(bot.screen_message_handler(update_for("SKED"), ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        await bot.screen_message_handler(update_for("FLEET DOCS"), ctx)
+        latest = ctx.user_data["main_screen_message_id"]
+        assert "FLEET DOCS" in ctx.bot.edit_message_text.call_args.kwargs["text"]
+    finally:
+        release.set()
+        await first
+    assert ctx.user_data["main_screen_message_id"] == latest
+    assert ctx.bot.edit_message_text.call_args.kwargs["message_id"] == latest
