@@ -1,6 +1,8 @@
 import type {
-  AircraftList, Checklist, Documents, FleetBrief, GroundDetail, GroundEntry, GroundHistory, GroundList, GroundPreview, GroundReport,
-  Journey, JourneyDays, JourneyFilters, Operator, Planned, PlannedPeriod, Priorities, RequestDetail, Requests, StationReport,
+  AircraftList, CharterAccess, CharterAirportProfileDraft, CharterCurrentFleet, CharterEstimateRequest, CharterEstimateResponse, CharterMatrix,
+  CharterOpportunities, CharterParse, CharterRateCard, CharterRateDraft, CharterRequest, Checklist, Documents, FleetBrief,
+  GroundDetail, GroundEntry, GroundHistory, GroundList, GroundPreview, GroundReport,
+  Journey, JourneyDays, JourneyFilters, Operator, Planned, PlannedPeriod, Priorities, StationReport,
 } from './ops-types'
 
 export type Status = 'READY' | 'PARTIAL' | 'UNAVAILABLE' | 'STALE'
@@ -114,7 +116,9 @@ export function createOpsApi(headers: HeadersInit) {
     if (response.ok) return response.json()
     const body = await response.json().catch(() => null)
     if (response.status === 401 || response.status === 403) cache.clear()
-    throw new ApiError(typeof body?.detail === 'string' ? body.detail : 'OPS request could not be completed.', response.status)
+    const validationMessage = response.status === 422 && Array.isArray(body?.detail) ? body.detail[0]?.msg : null
+    const detail = typeof body?.detail === 'string' ? body.detail : validationMessage
+    throw new ApiError(typeof detail === 'string' ? detail : 'OPS request could not be completed.', response.status)
   }
 
   async function get<T extends SourceState>(
@@ -167,6 +171,13 @@ export function createOpsApi(headers: HeadersInit) {
     requestHeaders.set('Content-Type', 'application/json')
     const response = await fetch(root + path, {
       method: 'POST', headers: requestHeaders, body: JSON.stringify(body), signal, cache: 'no-store',
+    })
+    return readResponse<T>(response)
+  }
+
+  async function readCharter<T>(path: string, signal: AbortSignal, refresh = false) {
+    const response = await fetch(root + 'charter/' + path + (refresh ? '?refresh=true' : ''), {
+      headers, signal, cache: 'no-store',
     })
     return readResponse<T>(response)
   }
@@ -224,10 +235,21 @@ export function createOpsApi(headers: HeadersInit) {
       if (charter) params.set('charter', 'true')
       return get<Priorities>('analytics/journey/priorities', params, signal, 75_000, refresh)
     },
-    charter: tool<FleetBrief>('charter/fleet', 70_000),
-    requests: tool<Requests>('charter/sales', 75_000),
-    request: (id: number) => tool<RequestDetail>('charter/sales/' + id, 75_000),
-    requestPriorities: (id: number) => tool<Priorities>('charter/sales/' + id + '/priorities', 75_000),
+    charterEstimate: (payload: CharterEstimateRequest, signal: AbortSignal) =>
+      post<CharterEstimateResponse>('charter/estimate', payload, signal),
+    charterAccess: (signal: AbortSignal) => readCharter<CharterAccess>('access', signal),
+    charterCurrentFleet: (signal: AbortSignal, refresh = false) =>
+      readCharter<CharterCurrentFleet>('current-fleet', signal, refresh),
+    charterParse: (text: string, signal: AbortSignal) => post<CharterParse>('charter/parse', { text }, signal),
+    charterMatrix: (request: CharterRequest, signal: AbortSignal) =>
+      post<CharterMatrix>('charter/matrix', { request }, signal),
+    charterRefine: (current_brief: string, instruction: string, signal: AbortSignal) =>
+      post<{ brief: string }>('charter/brief/refine', { current_brief, instruction }, signal),
+    charterOpportunities: (signal: AbortSignal, refresh = false) =>
+      readCharter<CharterOpportunities>('opportunities', signal, refresh),
+    charterRates: (signal: AbortSignal) => readCharter<CharterRateCard>('rates', signal),
+    saveCharterRate: (rate: CharterRateDraft | CharterAirportProfileDraft, signal: AbortSignal) =>
+      post<CharterRateCard>('charter/rates', rate, signal),
   }
 }
 

@@ -8,10 +8,12 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
+from api.charter_routes import create_charter_router
 from api.telegram_auth import require_telegram_access
 from application.ops_views import OpsViews, source_state
 from services.analytics_ai import prioritize_metrics
 from services.analytics_insights import build_insights
+from services.charter_estimator import CharterEstimateError, validate_route
 from services.charter_intelligence import (
     CHECKLIST_TOOLS,
     charter_request_sources,
@@ -88,6 +90,32 @@ class GroundReportPreview(GroundReport):
     station_notes_allowed: bool
 
 
+class CharterEstimateRequest(BaseModel):
+    departure: str = Field(pattern=r"^[A-Z0-9]{4}$")
+    arrival: str = Field(pattern=r"^[A-Z0-9]{4}$")
+    departure_utc: AwareDatetime
+    return_utc: AwareDatetime | None = None
+    aircraft: str = Field(pattern=r"^[A-Z0-9-]{1,12}$")
+    passengers: int = Field(ge=1, le=100, strict=True)
+    isa_deviation_c: float = Field(default=0, ge=-40, le=40)
+    wind_kt: float = Field(default=0, ge=-150, le=150)
+
+    @model_validator(mode="after")
+    def normalize_times(self):
+        # The source window needs seven calendar days on each side of the quote.
+        try:
+            self.departure_utc = self.departure_utc.astimezone(UTC)
+            if self.return_utc is not None:
+                self.return_utc = self.return_utc.astimezone(UTC)
+                if self.return_utc <= self.departure_utc:
+                    raise ValueError("Return UTC must be after departure UTC.")
+            self.departure_utc - timedelta(days=7)
+            (self.return_utc or self.departure_utc) + timedelta(days=8)
+        except OverflowError:
+            raise ValueError("Enter UTC dates within the supported range.") from None
+        return self
+
+
 def event_time(event, turn, now):
     when = event.event_at or now
     if not now - timedelta(hours=24) <= when <= now:
@@ -110,6 +138,7 @@ def flight_code(value):
 def create_ops_router(flights, flight_window):
     router = APIRouter()
     views = OpsViews()
+    router.include_router(create_charter_router(views))
     Selection = Annotated[tuple, Depends(flight_window)]
 
     async def resolve_turn(key, *, refresh=False):
@@ -339,6 +368,16 @@ def create_ops_router(flights, flight_window):
     async def charter_fleet(actor: Actor, refresh: bool = False):
         result = await views.fleet(False, actor, refresh=refresh)
         return {**result, "sales_access": charter_sales_access(actor)}
+
+    @router.post("/charter/estimate")
+    async def charter_estimate(payload: CharterEstimateRequest):
+        try:
+            validate_route(payload.departure, payload.arrival)
+            return await views.charter_estimate(**payload.model_dump())
+        except CharterEstimateError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except ConnectionError:
+            raise HTTPException(502, "Leon fleet unavailable. Try again.") from None
 
     @router.get("/charter/sales")
     async def charter_sales(actor: Actor, refresh: bool = False):

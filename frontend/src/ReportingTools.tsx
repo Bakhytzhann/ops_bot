@@ -1,16 +1,14 @@
-import { useCallback, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useState, type FormEvent } from 'react'
 import type { Load, OpsApi, Selection } from './api'
 import { Button } from './components/ui'
-import { AircraftPosition } from './FleetTools'
-import { Empty, Facts, ToolPanel, ToolRow, ToolTabs } from './OpsCommon'
-import type { Journey, JourneyDays, JourneyFilters, LegRef, Planned, PlannedPeriod, Priorities } from './ops-types'
+import { Empty, Facts, ToolPanel, ToolTabs } from './OpsCommon'
+import type { Journey, JourneyDays, JourneyFilters, Planned, PlannedPeriod, Priorities } from './ops-types'
 import { Resource, utcStamp } from './presentation'
 
 const ranges: [PlannedPeriod, string][] = [['7d', '7 days'], ['1m', '1 month'], ['3m', '3 months'], ['6m', '6 months'], ['12m', '12 months']]
 const emptyFilters: JourneyFilters = { departure: '', arrival: '', aircraft_type: '' }
 const analyticsModes = [['planned', 'Leon schedule'], ['journey', 'Journey Log']] as const
 const plannedViews = [['management', 'Overview'], ['commercial', 'Commercial'], ['finance', 'Finance'], ['timings', 'Timings']] as const
-const charterModes = [['fleet', 'Fleet'], ['journey', 'Journey Log']] as const
 const analyticsPriorities: Record<string, string> = {
   block: 'Compare reported block time and schedule for the same route and aircraft type.',
   fuel: 'Check reported fuel burn, uplift and units. Reconcile charges with invoices.',
@@ -23,14 +21,6 @@ const analyticsPriorities: Record<string, string> = {
   crew: 'Confirm crew availability and capture additional crew costs.',
   handling: 'Reconcile ordered ground and cabin services with recorded delivery.',
   margin: 'Link quotes, flight records and invoices to measure actual margin.',
-}
-const charterPriorities: Record<string, string> = {
-  quote: 'Compare quoted prices and verified costs in the same currency before approving discounts.',
-  history: 'Load comparable Journey Log records for this route and aircraft type.',
-  fuel: 'Review reported fuel volumes and reconcile fuel invoices separately.',
-  block: 'Compare planned and reported block time before estimating another quote.',
-  plan: 'Review warnings on the matched ForeFlight plan.',
-  checklists: 'Compare quoted services with the matched Leon checklists.',
 }
 const min = (value?: number | null) => value == null ? undefined : value + ' min'
 const hours = (value?: number | null) => value == null ? undefined : (value / 60).toFixed(1) + ' h'
@@ -129,14 +119,14 @@ function JourneyFacts({ data }: { data: Journey }) {
   </>
 }
 
-function JourneyAnalytics({ api, charter, selection }: { api: OpsApi; charter?: boolean; selection?: Selection }) {
-  const [days, setDays] = useState<JourneyDays>(charter ? 30 : 7)
+function JourneyAnalytics({ api, selection }: { api: OpsApi; selection?: Selection }) {
+  const [days, setDays] = useState<JourneyDays>(7)
   const [form, setForm] = useState(emptyFilters)
   const [filters, setFilters] = useState(emptyFilters)
   const [error, setError] = useState('')
   const load = useCallback((signal: AbortSignal, refresh?: boolean) => api.journey(days, filters, signal, refresh), [api, days, filters])
   const priorities = useCallback((signal: AbortSignal, refresh?: boolean) =>
-    api.journeyPriorities(days, filters, Boolean(charter), signal, refresh), [api, days, filters, charter])
+    api.journeyPriorities(days, filters, false, signal, refresh), [api, days, filters])
 
   function filter(event: FormEvent) {
     event.preventDefault()
@@ -151,7 +141,7 @@ function JourneyAnalytics({ api, charter, selection }: { api: OpsApi; charter?: 
   return <>
     <form className="ops-panel tool-form" onSubmit={filter} aria-label="Journey Log filters">
       <label>Period<select value={days} onChange={(event) => setDays(Number(event.target.value) as JourneyDays)}>
-        {(charter ? [30, 90] : [7, 30, 90, 365]).map((day) => <option key={day} value={day}>{day} days</option>)}
+        {[7, 30, 90, 365].map((day) => <option key={day} value={day}>{day} days</option>)}
       </select></label>
       <div className="grid grid-cols-2 gap-2">
         <label>DEP ICAO<input value={form.departure} maxLength={4} pattern="[A-Z0-9]{4}" onChange={(event) => setForm({ ...form, departure: event.target.value.toUpperCase() })} /></label>
@@ -178,7 +168,7 @@ function JourneyAnalytics({ api, charter, selection }: { api: OpsApi; charter?: 
         <p className="tool-line minor">{dateRange(data)} · {data.covered_days} / {days} days covered
           {data.last_synced_at && ' · Synced ' + utcStamp(data.last_synced_at)}</p>
         <JourneyFacts data={data} />
-        <PriorityReview load={priorities} labels={charter ? charterPriorities : analyticsPriorities} />
+        <PriorityReview load={priorities} labels={analyticsPriorities} />
       </ToolPanel>}
     </Resource>
   </>
@@ -190,71 +180,4 @@ export function Analytics({ api, selection }: { api: OpsApi; selection?: Selecti
     <ToolTabs label="Analytics source" options={analyticsModes} active={mode} onChange={setMode} />
     {mode === 'planned' ? <PlannedAnalytics api={api} /> : <JourneyAnalytics api={api} selection={selection} />}
   </>
-}
-
-export function CharterCheck({ api, selection, onFlight, onSales }: {
-  api: OpsApi; selection?: Selection; onFlight: (leg: LegRef) => void; onSales: () => void
-}) {
-  const [mode, setMode] = useState<typeof charterModes[number][0]>('fleet')
-  return <>
-    <ToolTabs label="Charter view" options={charterModes} active={mode} onChange={setMode} />
-    {mode === 'journey' ? <JourneyAnalytics api={api} selection={selection} charter /> :
-      <Resource load={api.charter} label="charter fleet">
-        {(data, refresh, refreshing) => <>
-          {data.sales_access && <div className="ops-panel"><ToolRow title="Charter Sales" detail="Leon quote requests" onClick={onSales} /></div>}
-          <ToolPanel title="Fleet and next legs" source="Leon schedule" state={data} refresh={refresh} refreshing={refreshing}>
-            {data.fleet?.length ? data.fleet.map((item) => <AircraftPosition key={item.registration} item={item} onFlight={onFlight} />)
-              : <Empty>No aircraft in the charter schedule window.</Empty>}
-          </ToolPanel>
-        </>}
-      </Resource>}
-  </>
-}
-
-export function CharterSales({ api, onRequest }: { api: OpsApi; onRequest: (id: number) => void }) {
-  return <Resource load={api.requests} label="charter quote requests">
-    {(data, refresh, refreshing) => <ToolPanel title="Quote requests" source="Leon Sales · last 30 days" state={data} refresh={refresh} refreshing={refreshing}>
-      {data.requests?.length ? data.requests.map((request) => <ToolRow key={request.id} title={request.label} onClick={() => onRequest(request.id)} />)
-        : <Empty>No recent quote requests returned.</Empty>}
-    </ToolPanel>}
-  </Resource>
-}
-
-export function CharterRequest({ api, id }: { api: OpsApi; id: number }) {
-  const load = useMemo(() => api.request(id), [api, id])
-  const priorities = useMemo(() => api.requestPriorities(id), [api, id])
-  return <Resource load={load} label="charter request">
-    {(data, refresh, refreshing) => <ToolPanel title={data.rfq?.reference ?? 'Quote request'} source="Leon Sales" state={data} refresh={refresh} refreshing={refreshing}>
-      {data.rfq && <>
-        <Facts entries={[[ 'Status', data.rfq.status], ['Created UTC', utcStamp(data.rfq.created_at)], ['Quote variants', data.rfq.variant_count]]} />
-        {data.rfq.legs.map((leg, index) => <div className="tool-line" key={index}>
-          <strong>{leg.departure ?? '—'} → {leg.arrival ?? '—'}</strong>
-          <p className="minor">{utcStamp(leg.departure_utc)}{leg.pax !== null && ' · PAX ' + leg.pax}</p>
-        </div>)}
-        {data.rfq.variants.map((variant, index) => <details className="tool-disclosure" key={index}>
-          <summary>{[variant.aircraft, variant.type, variant.status].filter(Boolean).join(' · ') || 'Quote variant ' + (index + 1)}</summary>
-          <Facts entries={[[ 'Quote', variant.quote_price == null ? null : [variant.quote_price, variant.quote_currency].filter(Boolean).join(' ')],
-            ['Calculated cost', variant.calculated_cost == null ? null : [variant.calculated_cost, variant.pricing_currency].filter(Boolean).join(' ')],
-            ['Reported margin', variant.reported_margin_pct === null ? null : variant.reported_margin_pct + '%'],
-            ['Subcharter', variant.subcharter ? 'Yes' : '—'], ['Outdated', variant.outdated ? 'Yes' : '—']]} />
-          {variant.legs.map((leg, i) => <p key={i} className="tool-line">{leg.departure ?? '—'} → {leg.arrival ?? '—'} · {utcStamp(leg.departure_utc)}</p>)}
-        </details>)}
-      </>}
-      {data.foreflight && <details className="tool-disclosure"><summary>Matched ForeFlight plan</summary>
-        <Facts entries={[[ 'Route', data.foreflight.route], ['STD', utcStamp(data.foreflight.departure_utc)],
-          ['Performance ETE', min(data.foreflight.ete_minutes)], ['Fuel to destination', data.foreflight.fuel_to_destination === null ? null :
-            data.foreflight.fuel_to_destination + ' ' + (data.foreflight.fuel_unit ?? '')],
-          ['Plan warnings', data.foreflight.has_warnings ? 'Review' : '—']]} />
-      </details>}
-      {Object.entries(data.checklists ?? {}).map(([group, checklist]) => checklist && <details className="tool-disclosure" key={group}>
-        <summary>{group.toUpperCase().replace('_', ' ')} checklist · {checklist.count}</summary>
-        {checklist.items.map((item, index) => <p className="tool-line" key={index}>{item.item} · {item.statuses.join(' / ') || 'Status unreported'}</p>)}
-      </details>)}
-      {data.history?.map((match, index) => <details className="tool-disclosure" key={index}>
-        <summary>{match.route} · {match.aircraft_type ?? 'All types'} · Reported history</summary>
-        <JourneyFacts data={match.summary} />
-      </details>)}
-      {data.rfq && <PriorityReview load={priorities} labels={charterPriorities} />}
-    </ToolPanel>}
-  </Resource>
 }

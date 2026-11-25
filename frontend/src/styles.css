@@ -116,6 +116,14 @@
       text-base text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary;
   }
   .tool-form .checkbox-label { @apply flex min-h-11 items-center gap-2; }
+
+  .charter-desk .tool-form textarea { @apply resize-y; }
+  .charter-aircraft-card {
+    @apply grid min-w-0 gap-2 rounded-lg border border-border bg-background/70 p-2.5 text-left
+      outline-none hover:border-primary/55 focus-visible:ring-2 focus-visible:ring-primary
+      aria-pressed:border-primary/65 aria-pressed:bg-primary/8;
+  }
+  .charter-aircraft-detail { scroll-margin-top: calc(5rem + var(--safe-top)); }
 }
 
 @media (max-width: 330px) {

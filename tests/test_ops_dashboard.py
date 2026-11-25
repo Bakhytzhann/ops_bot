@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -10,6 +11,7 @@ from application import ops_views
 from config.settings import settings
 from services import charter_intelligence
 from services.ground_turns import GroundTurnStore
+from services.journey_history import JourneyHistory
 from services.station_notes import NotesRepository
 from tests.test_mini_app import BASE, DAY, LEG, signed_headers
 from tests.test_mini_app import sources as sources
@@ -225,6 +227,156 @@ def test_sales_permissions_are_checked_before_source_or_cache(sources, monkeypat
         monkeypatch.setattr(settings, "charter_sales_user_ids", "")
         assert client.get(path, headers=headers).status_code == 403
         requests.assert_awaited_once()
+
+
+def test_quick_quote_uses_leon_fleet_ferry_and_linked_crew(
+    sources, monkeypatch, tmp_path
+):
+    ferry = {
+        **LEG,
+        "departure": "UACC",
+        "arrival": "UAAA",
+        "ferry": True,
+    }
+    schedule = AsyncMock(return_value={"complete": True, "flights": [ferry]})
+    fleet = AsyncMock(
+        return_value=[
+            {"aircraftNid": 1, "registration": LEG["aircraft"], "acftTypeName": "E35L"}
+        ]
+    )
+    crew = AsyncMock(
+        return_value={
+            "status": "available",
+            "flight": {"id": LEG["flightNid"]},
+            "members": [{"role": "PIC", "fdp_remaining": "02:30"}],
+        }
+    )
+    sales = AsyncMock()
+    saved_routes = [
+        {"departure": "UAAA", "destination": "UZTT", "route": "TEST1 A100 TEST2"}
+    ]
+    catalog = AsyncMock(return_value=saved_routes)
+    route = AsyncMock(return_value={"route": "TEST1 A100 TEST2", "distance_nm": 420.5})
+    monkeypatch.setattr(ops_views, "get_flight_schedule", schedule)
+    monkeypatch.setattr(ops_views, "call_leon", fleet)
+    monkeypatch.setattr(ops_views, "charter_crew", crew)
+    monkeypatch.setattr(ops_views, "list_charter_requests", sales)
+    monkeypatch.setattr(ops_views, "load_saved_charter_routes", catalog)
+    monkeypatch.setattr(ops_views, "find_charter_route", route)
+    monkeypatch.setattr(
+        ops_views, "journey_history", JourneyHistory(tmp_path / "journey.sqlite3")
+    )
+    monkeypatch.setattr(settings, "charter_sales_user_ids", "")
+
+    path = BASE + "/charter/estimate"
+    request = {
+        "departure": "UAAA",
+        "arrival": "UZTT",
+        "departure_utc": f"{DAY}T15:00:00+05:00",
+        "aircraft": LEG["aircraft"],
+        "passengers": 3,
+    }
+    with TestClient(create_app()) as client:
+        assert client.post(path, json=request).status_code == 401
+        fleet.assert_not_called()
+        schedule.assert_not_called()
+
+        for arrival in ("UZTT", "UACC"):
+            response = client.post(
+                path, json={**request, "arrival": arrival}, headers=signed_headers()
+            )
+            assert response.status_code == 200, response.text
+            quote = response.json()
+            assert quote["legs"][0]["arrival"] == arrival
+            assert quote["legs"][0]["departure_utc"] == f"{DAY}T10:00:00+00:00"
+            assert quote["legs"][0]["route"] == "TEST1 A100 TEST2"
+            assert quote["legs"][0]["distance_nm"] == 420.5
+            assert quote["legs"][0]["block_basis"] == "isa_model"
+            assert quote["position"]["station"] == "UAAA"
+            assert quote["position"]["scheduled_ferry"]["flight_id"] == LEG["flightNid"]
+            assert quote["crew"]["flight"]["id"] == LEG["flightNid"]
+            assert quote["crew"]["members"][0]["fdp_remaining"] == "02:30"
+
+    fleet.assert_awaited_once_with("get-fleet", {"includeGndAircraft": False})
+    schedule.assert_awaited_once_with("2026-11-13", "2026-11-27")
+    crew.assert_awaited_once_with(ferry)
+    catalog.assert_awaited_once()
+    assert route.await_count == 2
+    for call in route.await_args_list:
+        assert call.args[2] == datetime.fromisoformat(f"{DAY}T10:00:00+00:00")
+        assert call.args[3:] == (LEG["aircraft"], 3)
+        assert call.kwargs == {"saved_routes": saved_routes}
+    sales.assert_not_called()
+
+
+def test_quote_routes_roundtrip_and_ferry_at_their_own_times(monkeypatch):
+    route = AsyncMock(
+        side_effect=lambda *leg, **_params: {
+            "route": "TEST1 A100 TEST2",
+            "distance_nm": leg[2].hour,
+        }
+    )
+    monkeypatch.setattr(ops_views, "find_charter_route", route)
+    departure = datetime.fromisoformat(f"{DAY}T10:00:00+00:00")
+    return_at = departure + timedelta(hours=6)
+    flight = {**LEG, "departure": "UAAA", "arrival": "UACC"}
+    payload = {
+        "departure": "UAAA",
+        "arrival": "UACC",
+        "departure_utc": departure,
+        "return_utc": return_at,
+        "aircraft": LEG["aircraft"],
+        "passengers": 3,
+    }
+    schedule = {"complete": True, "flights": [flight]}
+    routes, ferry = asyncio.run(
+        ops_views.OpsViews().charter_routes(payload, schedule, [{}])
+    )
+
+    assert routes[("UAAA", "UACC")]["distance_nm"] == 10
+    assert routes[("UACC", "UAAA")]["distance_nm"] == 16
+    assert ferry["distance_nm"] == 10
+    assert {call.args[4] for call in route.await_args_list} == {0, 3}
+
+
+def test_quick_quote_validates_airports_aircraft_and_times(sources, monkeypatch):
+    fleet = AsyncMock(return_value=[])
+    schedule = AsyncMock()
+    monkeypatch.setattr(ops_views, "call_leon", fleet)
+    monkeypatch.setattr(ops_views, "get_flight_schedule", schedule)
+    path = BASE + "/charter/estimate"
+    request = {
+        "departure": "UAAA",
+        "arrival": "UACC",
+        "departure_utc": f"{DAY}T10:00:00Z",
+        "aircraft": LEG["aircraft"],
+        "passengers": 1,
+    }
+    with TestClient(create_app()) as client:
+        for invalid in (
+            {"departure": "ALA"},
+            {"departure_utc": f"{DAY}T10:00:00"},
+            {"return_utc": f"{DAY}T09:59:00Z"},
+            {"passengers": 0},
+            {"wind_kt": 151},
+        ):
+            response = client.post(
+                path, json={**request, **invalid}, headers=signed_headers()
+            )
+            assert response.status_code == 422, response.text
+        response = client.post(
+            path, json={**request, "arrival": "0000"}, headers=signed_headers()
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Unknown airport ICAO code: 0000."
+        fleet.assert_not_called()
+
+        response = client.post(path, json=request, headers=signed_headers())
+        assert response.status_code == 422
+        assert (
+            response.json()["detail"] == "Selected aircraft is not in the Leon fleet."
+        )
+    schedule.assert_not_called()
 
 
 def test_documents_filter_unmatched_aircraft_and_unsafe_links(sources, monkeypatch):

@@ -1,6 +1,7 @@
 import { CalendarDays, ChartNoAxesCombined, ChevronLeft, ClipboardList, FolderOpen, PlaneTakeoff, Radar, Search } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { Display, OpsApi, Selection } from './api'
+import { Charter } from './Charter'
 import { Badge, Button } from './components/ui'
 import { Dashboard, type DashboardAction } from './Dashboard'
 import { FleetDocs, OpsBrief } from './FleetTools'
@@ -8,7 +9,7 @@ import { FlightCard } from './FlightCard'
 import { GroundStation, GroundStatus, GroundTurn } from './GroundStatus'
 import { turnForFlight, type LegRef, type Turn } from './ops-types'
 import { Preparation } from './Preparation'
-import { Analytics, CharterCheck, CharterRequest, CharterSales } from './ReportingTools'
+import { Analytics } from './ReportingTools'
 import { Schedule, type SkedFilters, weekDay } from './Sked'
 import { Resource, utcDate, useUtcClock } from './presentation'
 
@@ -70,7 +71,7 @@ const actions = [
   { view: 'brief', label: 'OPS BRIEF', icon: ClipboardList },
   { view: 'docs', label: 'FLEET DOCS', icon: FolderOpen },
   { view: 'analytics', label: 'ANALYTICS', icon: ChartNoAxesCombined },
-  { view: 'charter', label: 'CHARTER', icon: Search },
+  { view: 'charter', label: 'CHARTER CHECK', icon: Search },
 ] as const
 
 type Screen =
@@ -82,13 +83,10 @@ type Screen =
   | { view: 'ground-linked'; selection: Selection }
   | { view: 'ground-turn'; turn: Turn }
   | { view: 'ground-station'; station: string }
-  | { view: 'charter-sales' }
-  | { view: 'charter-request'; id: number }
 
 const screenTitles: Partial<Record<Screen['view'], string>> = {
   dashboard: 'OPS · DISPATCH EFB', card: 'FLIGHT CARD', prep: 'PREPARATION', linked: 'FLIGHT CARD',
   'ground-linked': 'GROUND STATUS', 'ground-turn': 'GROUND TURN', 'ground-station': 'STATION STATISTICS',
-  'charter-sales': 'Charter Sales', 'charter-request': 'Quote Request',
 }
 
 function ResolvedGround({ turn, onSelect }: { turn?: Turn; onSelect: (turn?: Turn) => void }) {
@@ -208,13 +206,7 @@ export function App({ api, host }: { api: OpsApi; host: AppHost }) {
       content = <Analytics api={api} selection={selection} />
       break
     case 'charter':
-      content = <CharterCheck api={api} selection={selection} onFlight={openLinked} onSales={() => open({ view: 'charter-sales' })} />
-      break
-    case 'charter-sales':
-      content = <CharterSales api={api} onRequest={(id) => open({ view: 'charter-request', id })} />
-      break
-    case 'charter-request':
-      content = <CharterRequest api={api} id={screen.id} />
+      content = <Charter api={api} />
       break
   }
 

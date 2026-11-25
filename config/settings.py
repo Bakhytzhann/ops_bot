@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     telegram_allowed_user_ids: str = ""
     telegram_admin_ids: str = ""
     charter_sales_user_ids: str = ""
+    charter_crew_operations_path: Path | None = None
     telegram_bot_username: str = "OPS_bot"
 
     leon_api_key: SecretStr | None = None
@@ -49,6 +50,7 @@ class Settings(BaseSettings):
     foreflight_api_key: SecretStr | None = None
     foreflight_vendor_id: SecretStr | None = None
     foreflight_api_url: str = ""
+    foreflight_charter_autoroute: bool = False
 
     database_path: Path = Path("data/agent.db")
     log_dir: Path = Path("logs")
@@ -85,6 +87,11 @@ class Settings(BaseSettings):
     @classmethod
     def resolve_path(cls, value):
         return (project_directory() / value).resolve()
+
+    @field_validator("charter_crew_operations_path", mode="before")
+    @classmethod
+    def resolve_crew_operations_path(cls, value):
+        return (project_directory() / value).resolve() if value else None
 
     @field_validator("telegram_mini_app_url")
     @classmethod
