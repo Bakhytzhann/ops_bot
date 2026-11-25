@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import re
 import shutil
 import socket
@@ -16,24 +18,21 @@ import httpx
 logger = logging.getLogger(__name__)
 HOST = "127.0.0.1"
 PORT = 8000
-TUNNEL_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com(?![\w.-])")
+NGROK_ERROR = re.compile(r"\bERR_NGROK_\d+\b")
 
 
 class StartupError(RuntimeError):
     pass
 
 
-def cloudflared_path(root):
-    executable = "cloudflared.exe" if sys.platform == "win32" else "cloudflared"
-    for path in (root / ".cache" / "cloudflared" / executable, root / executable):
+def ngrok_path(root):
+    executable = "ngrok.exe" if sys.platform == "win32" else "ngrok"
+    for path in (root / ".cache" / "ngrok" / executable, root / executable):
         if path.is_file():
             return str(path)
-    installed = shutil.which(executable)
-    if installed:
+    if installed := shutil.which(executable):
         return installed
-    raise StartupError(
-        "cloudflared not found. Install it or put it in the project root."
-    )
+    raise StartupError("ngrok not found. Install ngrok or put it in .cache/ngrok.")
 
 
 @contextmanager
@@ -71,23 +70,6 @@ def local_api(port=PORT):
             worker.join(timeout=8)
 
 
-def read_tunnel_output(output, ready):
-    public_url = None
-    connected = False
-    try:
-        for line in output:
-            if public_url is None and (match := TUNNEL_URL.search(line)):
-                public_url = match.group()
-            if public_url and not connected and "Registered tunnel connection" in line:
-                connected = True
-                ready.put(public_url)
-            if " ERR " in line or " FTL " in line:
-                logger.warning("cloudflared: %s", line.strip())
-    finally:
-        if not connected:
-            ready.put(None)
-
-
 def wait_for_public_api(url, process, timeout=90):
     deadline = monotonic() + timeout
     status = "no HTTPS response"
@@ -105,19 +87,57 @@ def wait_for_public_api(url, process, timeout=90):
             remaining = deadline - monotonic()
             if remaining <= 0:
                 raise StartupError(
-                    f"Cloudflare tunnel registered, but FastAPI is unreachable over HTTPS ({status})."
+                    f"ngrok tunnel started, but FastAPI is unreachable over HTTPS ({status})."
                 )
             sleep(min(1, remaining))
-    raise StartupError("cloudflared exited before the public API was reachable.")
+    raise StartupError("ngrok exited before the public API was reachable.")
+
+
+def _stop_tunnel(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def _read_ngrok_output(output, ready, endpoint):
+    announced = False
+    error_code = None
+    try:
+        for line in output:
+            if match := NGROK_ERROR.search(line):
+                error_code = match.group()
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (
+                not announced
+                and isinstance(event, dict)
+                and (
+                    event.get("msg") in {"started tunnel", "started endpoint"}
+                    and event.get("url") in {endpoint, endpoint + "/"}
+                )
+            ):
+                announced = True
+                ready.put((True, None))
+    finally:
+        if not announced:
+            ready.put((False, error_code))
 
 
 @contextmanager
-def quick_tunnel(executable, origin, timeout=45):
+def ngrok_tunnel(executable, origin, *, endpoint, token, timeout=45):
     with NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as config:
-        config.write("{}\n")
+        config.write(
+            'version: "3"\nagent:\n  web_addr: "false"\n  update_check: false\n'
+        )
     config_path = Path(config.name)
     process_options = (
-        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        {"creationflags": subprocess.CREATE_NO_WINDOW}
         if sys.platform == "win32"
         else {"start_new_session": True}
     )
@@ -125,54 +145,47 @@ def quick_tunnel(executable, origin, timeout=45):
         with subprocess.Popen(
             [
                 executable,
-                "tunnel",
+                "http",
+                origin,
+                "--url",
+                endpoint,
                 "--config",
                 str(config_path),
-                "--no-autoupdate",
-                "--url",
-                origin,
+                "--inspect=false",
+                "--log=stdout",
+                "--log-format=json",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             encoding="utf-8",
             errors="replace",
+            env={**os.environ, "NGROK_AUTHTOKEN": token},
             **process_options,
         ) as process:
             ready = SimpleQueue()
             reader = Thread(
-                target=read_tunnel_output,
-                args=(process.stdout, ready),
+                target=_read_ngrok_output,
+                args=(process.stdout, ready, endpoint),
                 daemon=True,
             )
             try:
                 reader.start()
-                deadline = monotonic() + timeout
-                while True:
-                    try:
-                        url = ready.get(timeout=0.2)
-                    except Empty:
-                        if monotonic() >= deadline:
-                            raise StartupError(
-                                "Cloudflare Quick Tunnel startup timed out."
-                            ) from None
-                    else:
-                        break
-                if url is None or process.poll() is not None:
+                try:
+                    started, error_code = ready.get(timeout=timeout)
+                except Empty:
                     raise StartupError(
-                        "cloudflared exited before the tunnel was ready."
+                        "ngrok did not start the configured endpoint in time."
+                    ) from None
+                if not started or process.poll() is not None:
+                    detail = f" ({error_code})" if error_code else ""
+                    raise StartupError(
+                        f"ngrok exited before the configured endpoint started{detail}."
                     )
-                print("Cloudflare tunnel registered. Waiting for HTTPS...", flush=True)
-                wait_for_public_api(url, process)
-                yield url
+                wait_for_public_api(endpoint, process)
+                yield endpoint
             finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
+                _stop_tunnel(process)
                 if reader.ident is not None:
                     reader.join(timeout=1)
     finally:
@@ -189,13 +202,19 @@ def run():
     root = project_directory()
     if not (root / "frontend" / "dist" / "index.html").is_file():
         raise StartupError("Mini App build is missing. Run npm run build in frontend.")
-    executable = cloudflared_path(root)
     if not settings.telegram_bot_token:
         raise StartupError("TELEGRAM_BOT_TOKEN not configured.")
+    endpoint = settings.ngrok_endpoint
+    token = (
+        settings.ngrok_token.get_secret_value().strip() if settings.ngrok_token else ""
+    )
+    if not (endpoint and token):
+        raise StartupError("Set both NGROK_TOKEN and NGROK_ENDPOINT for ngrok.")
+    executable = ngrok_path(root)
     settings.database_path.parent.mkdir(parents=True, exist_ok=True)
     with local_api() as origin:
         print(f"FastAPI: {origin}", flush=True)
-        with quick_tunnel(executable, origin) as url:
+        with ngrok_tunnel(executable, origin, endpoint=endpoint, token=token) as url:
             print(f"Mini App tunnel: {url}", flush=True)
             run_bot(mini_app_url=url)
 

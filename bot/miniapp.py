@@ -1,7 +1,5 @@
-from urllib.parse import urlsplit
-
 from loguru import logger
-from telegram import MenuButtonDefault, MenuButtonWebApp, WebAppInfo
+from telegram import MenuButtonWebApp, WebAppInfo
 from telegram.error import TelegramError
 
 TUNNEL_MENU = "ops_tunnel_menu"
@@ -24,10 +22,6 @@ async def publish_tunnel_menu(application, url):
     bot = application.bot
     try:
         previous = await bot.get_chat_menu_button()
-        if isinstance(previous, MenuButtonWebApp) and previous.text == "OPS":
-            host = urlsplit(previous.web_app.url).hostname or ""
-            if host.endswith(".trycloudflare.com"):
-                previous = MenuButtonDefault()
         application.bot_data[TUNNEL_MENU] = (url, previous)
         await bot.set_chat_menu_button(menu_button=ops_menu(url))
     except TelegramError as exc:

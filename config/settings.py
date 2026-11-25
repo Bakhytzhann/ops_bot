@@ -36,6 +36,8 @@ class Settings(BaseSettings):
 
     telegram_bot_token: SecretStr | None = None
     telegram_mini_app_url: str = ""
+    ngrok_token: SecretStr | None = None
+    ngrok_endpoint: str = ""
     telegram_allowed_user_ids: str = ""
     telegram_admin_ids: str = ""
     charter_sales_user_ids: str = ""
@@ -109,6 +111,32 @@ class Settings(BaseSettings):
         ):
             raise ValueError("The Telegram Mini App URL must be a valid HTTPS URL")
         return value
+
+    @field_validator("ngrok_endpoint")
+    @classmethod
+    def validate_ngrok_endpoint(cls, value):
+        value = value.strip()
+        if not value:
+            return ""
+        flag, sep, endpoint = value.partition("=")
+        if flag == "--url" and sep:
+            value = endpoint.strip().strip("\"'")
+        elif value.split(maxsplit=1)[0] == "--url":
+            value = value.removeprefix("--url").strip().strip("\"'")
+        url = urlsplit(value)
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.port is not None
+            or url.path not in {"", "/"}
+            or "?" in value
+            or "#" in value
+            or any(character.isspace() for character in value)
+        ):
+            raise ValueError("NGROK_ENDPOINT must be an HTTPS origin.")
+        return f"https://{url.hostname}"
 
     @property
     def admin_ids(self) -> set[int]:
